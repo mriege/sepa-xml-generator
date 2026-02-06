@@ -1,164 +1,302 @@
-// SEPA-XML Generator - Komplett im Browser
-// Maximal benutzerfreundlich mit Excel-Upload UND manueller Eingabe
+/**
+ * SEPA-XML Generator - Anwendungslogik
+ *
+ * Dieses Skript steuert die gesamte Benutzeroberflaeche des SEPA-XML Generators:
+ *   - Zahlungsart-Auswahl (Lastschrift / Ueberweisung)
+ *   - Eingabemethode (Excel-Upload / Manuelle Eingabe)
+ *   - Echtzeit-Validierung aller Formularfelder
+ *   - Excel-Datei-Import (via SheetJS/XLSX)
+ *   - SEPA-XML-Generierung und Download (via sepa.min.js)
+ *   - Konfigurationsverwaltung (localStorage + JSON-Datei)
+ *
+ * Abhaengigkeiten:
+ *   - sepa.min.js (SEPA-Bibliothek fuer XML-Erzeugung)
+ *   - XLSX (SheetJS - Excel-Datei-Parsing, via CDN)
+ *
+ * Architektur:
+ *   Alles laeuft innerhalb eines DOMContentLoaded-Event-Handlers.
+ *   Keine globalen Variablen ausser window.removeTransaction (fuer onclick in HTML).
+ *
+ * @file sepa-generator.js
+ * @requires sepa.min.js
+ * @requires xlsx.full.min.js
+ */
+
+// ============================================================
+// Initialisierung nach DOM-Laden
+// ============================================================
 
 document.addEventListener('DOMContentLoaded', function() {
-    // DOM Elements
+
+    // ============================================================
+    // DOM-Referenzen: Allgemeine UI-Elemente
+    // ============================================================
+
+    /** Datei-Upload-Input fuer Excel-Dateien */
     const fileInput = document.getElementById('excelFile');
+    /** Anzeige des ausgewaehlten Dateinamens */
     const fileName = document.getElementById('fileName');
+    /** Container fuer die Transaktions-Vorschautabelle */
     const previewSection = document.getElementById('previewSection');
+    /** <tbody> der Vorschautabelle */
     const previewBody = document.getElementById('previewBody');
+    /** Zusammenfassung (Anzahl Transaktionen, Gesamtbetrag) */
     const summary = document.getElementById('summary');
+    /** Button: SEPA-XML generieren und herunterladen */
     const generateBtn = document.getElementById('generateBtn');
+    /** Button: Alle Transaktionen zuruecksetzen */
     const resetBtn = document.getElementById('resetBtn');
+    /** Container fuer Fehlermeldungen */
     const errorSection = document.getElementById('errorSection');
+    /** Text-Element fuer die Fehlermeldung */
     const errorMessage = document.getElementById('errorMessage');
-    
-    // Payment type elements
+
+    // ============================================================
+    // DOM-Referenzen: Zahlungsart-Auswahl
+    // ============================================================
+
+    /** Button: SEPA-Lastschrift (Geld einziehen) */
     const directDebitBtn = document.getElementById('directDebitBtn');
+    /** Button: SEPA-Ueberweisung (Geld senden) */
     const transferBtn = document.getElementById('transferBtn');
+    /** Container: Lastschrift-spezifische Einstellungen (Glaeubigeor-Daten) */
     const directDebitSettings = document.getElementById('directDebitSettings');
+    /** Container: Ueberweisungs-spezifische Einstellungen (Auftraggeber-Daten) */
     const transferSettings = document.getElementById('transferSettings');
+    /** Info-Box: Hinweise fuer Lastschrift-Excel-Format */
     const directDebitInfo = document.getElementById('directDebitInfo');
+    /** Info-Box: Hinweise fuer Ueberweisungs-Excel-Format */
     const transferInfo = document.getElementById('transferInfo');
-    
-    // Input method tabs
+
+    // ============================================================
+    // DOM-Referenzen: Eingabemethode-Tabs
+    // ============================================================
+
+    /** Tab-Button: Excel-Upload */
     const excelTab = document.getElementById('excelTab');
+    /** Tab-Button: Manuelle Eingabe */
     const manualTab = document.getElementById('manualTab');
+    /** Content-Container: Excel-Upload-Bereich */
     const excelInputMethod = document.getElementById('excelInputMethod');
+    /** Content-Container: Manuelles Eingabeformular */
     const manualInputMethod = document.getElementById('manualInputMethod');
-    
-    // Manual input elements
+
+    // ============================================================
+    // DOM-Referenzen: Manuelle Eingabefelder
+    // ============================================================
+
+    /** Empfaenger/Schuldner-Name */
     const manualName = document.getElementById('manualName');
+    /** Empfaenger/Schuldner-IBAN */
     const manualIBAN = document.getElementById('manualIBAN');
+    /** Empfaenger/Schuldner-BIC (optional) */
     const manualBIC = document.getElementById('manualBIC');
+    /** Betrag in EUR */
     const manualAmount = document.getElementById('manualAmount');
+    /** Verwendungszweck */
     const manualRemittance = document.getElementById('manualRemittance');
+    /** Mandatsreferenz (Lastschrift) oder Referenz (Ueberweisung) */
     const manualReference = document.getElementById('manualReference');
+    /** Label fuer das Referenzfeld (aendert sich je nach Zahlungsart) */
     const manualReferenceLabel = document.getElementById('manualReferenceLabel');
+    /** Button: Einzelne Zahlung zur Liste hinzufuegen */
     const addManualEntry = document.getElementById('addManualEntry');
-    
-    // Config elements
+
+    // ============================================================
+    // DOM-Referenzen: Konfigurationsfelder
+    // ============================================================
+
+    /** Dropdown: Pain-Format-Auswahl (z.B. pain.008.001.08) */
     const painFormatSelect = document.getElementById('painFormat');
+    /** Initiator-Name (Ersteller der SEPA-Datei) */
     const initiatorNameInput = document.getElementById('initiatorName');
+    /** Ausfuehrungsdatum (optional, Standard: heute) */
     const executionDateInput = document.getElementById('executionDate');
+    /** Glaeubigeor-Name (nur Lastschrift) */
     const creditorNameInput = document.getElementById('creditorName');
+    /** Glaeubigeor-IBAN (nur Lastschrift) */
     const creditorIBANInput = document.getElementById('creditorIBAN');
+    /** Glaeubigeor-BIC (nur Lastschrift, optional) */
     const creditorBICInput = document.getElementById('creditorBIC');
+    /** Glaeubigeor-ID (nur Lastschrift, z.B. DE98ZZZ09999999999) */
     const creditorIdInput = document.getElementById('creditorId');
+    /** Sequenztyp: FRST/RCUR/OOFF/FNAL (nur Lastschrift) */
     const sequenceTypeSelect = document.getElementById('sequenceType');
+    /** Instrumentierung: CORE/COR1/B2B (nur Lastschrift) */
     const localInstrumentationSelect = document.getElementById('localInstrumentation');
+    /** Auftraggeber-Name (nur Ueberweisung) */
     const debtorNameInput = document.getElementById('debtorName');
+    /** Auftraggeber-IBAN (nur Ueberweisung) */
     const debtorIBANInput = document.getElementById('debtorIBAN');
+    /** Auftraggeber-BIC (nur Ueberweisung, optional) */
     const debtorBICInput = document.getElementById('debtorBIC');
+    /** Button: Excel-Vorlage herunterladen */
     const downloadTemplateBtn = document.getElementById('downloadTemplate');
 
+    // ============================================================
+    // Anwendungsstatus
+    // ============================================================
+
+    /** Liste aller aktuellen Transaktionen (aus Excel oder manueller Eingabe) */
     let currentTransactions = [];
-    let currentPaymentType = 'directDebit'; // or 'transfer'
-    
-    // Load config from localStorage
+
+    /** Aktuelle Zahlungsart: 'directDebit' (Lastschrift) oder 'transfer' (Ueberweisung) */
+    let currentPaymentType = 'directDebit';
+
+    // ============================================================
+    // Initialisierung: Gespeicherte Konfiguration laden
+    // ============================================================
+
+    // Konfiguration aus dem localStorage wiederherstellen (wenn vorhanden)
     loadConfigFromStorage();
-    
-    // Validate all pre-filled fields after loading
+
+    // Validierung aller vorausgefuellten Felder nach kurzem Delay
+    // (damit die DOM-Elemente vollstaendig aktualisiert sind)
     setTimeout(() => {
         validateAllFields();
     }, 100);
-    
-    // Event Listeners - Payment Type
+
+    // ============================================================
+    // Event-Listener: Zahlungsart-Auswahl
+    // ============================================================
+
     directDebitBtn.addEventListener('click', () => switchPaymentType('directDebit'));
     transferBtn.addEventListener('click', () => switchPaymentType('transfer'));
-    
-    // Event Listeners - Input Method
+
+    // ============================================================
+    // Event-Listener: Eingabemethode-Tabs
+    // ============================================================
+
     excelTab.addEventListener('click', () => switchInputMethod('excel'));
     manualTab.addEventListener('click', () => switchInputMethod('manual'));
-    
-    // Event Listeners - File Upload
+
+    // ============================================================
+    // Event-Listener: Datei-Upload
+    // ============================================================
+
     fileInput.addEventListener('change', handleFileSelect);
-    
-    // Event Listeners - Manual Entry
+
+    // ============================================================
+    // Event-Listener: Manuelle Eingabe
+    // ============================================================
+
     addManualEntry.addEventListener('click', addManualTransaction);
-    
-    // Event Listeners - Buttons
+
+    // ============================================================
+    // Event-Listener: Aktions-Buttons
+    // ============================================================
+
     generateBtn.addEventListener('click', generateAndDownload);
     resetBtn.addEventListener('click', resetApp);
     downloadTemplateBtn.addEventListener('click', downloadExcelTemplate);
-    
-    // Event Listeners - Field Validation
+
+    // ============================================================
+    // Event-Listener: Echtzeit-Feldvalidierung
+    // ============================================================
+
+    // IBAN-Felder: Mod-97-Pruefziffernvalidierung bei jeder Eingabe
     manualIBAN.addEventListener('input', validateIBAN);
     creditorIBANInput.addEventListener('input', validateIBAN);
     debtorIBANInput.addEventListener('input', validateIBAN);
-    
+
+    // BIC-Felder: Format-Validierung (8 oder 11 Zeichen, [A-Z]{6}[A-Z0-9]{2,5})
     manualBIC.addEventListener('input', validateBIC);
     creditorBICInput.addEventListener('input', validateBIC);
     debtorBICInput.addEventListener('input', validateBIC);
-    
+
+    // Betrags-Validierung (0.01 - 999.999.999,99 EUR)
     manualAmount.addEventListener('input', validateAmount);
-    
+
+    // Name-Validierung (2-70 Zeichen)
     manualName.addEventListener('input', validateName);
     creditorNameInput.addEventListener('input', validateName);
     debtorNameInput.addEventListener('input', validateName);
     initiatorNameInput.addEventListener('input', validateName);
-    
+
+    // Verwendungszweck (max. 140 Zeichen)
     manualRemittance.addEventListener('input', validateRemittance);
+
+    // Referenz/Mandatsreferenz (max. 35 Zeichen, Pflicht bei Lastschrift)
     manualReference.addEventListener('input', validateReference);
+
+    // Glaeubigeor-ID-Validierung (Format + Mod-97)
     creditorIdInput.addEventListener('input', validateCreditorId);
-    
+
+    // Datums-Validierung (muss in der Zukunft liegen)
     executionDateInput.addEventListener('input', validateDate);
-    
+
+    // Select-Felder: Visuelles Feedback bei Auswahl
     painFormatSelect.addEventListener('change', validateSelect);
     sequenceTypeSelect.addEventListener('change', validateSelect);
     localInstrumentationSelect.addEventListener('change', validateSelect);
-    
-    // Event Listeners - FAQ
+
+    // ============================================================
+    // Event-Listener: FAQ-Akkordeon
+    // ============================================================
+
     document.querySelectorAll('.faq-question').forEach(question => {
         question.addEventListener('click', function() {
             const item = this.closest('.faq-item');
             const wasActive = item.classList.contains('active');
-            
-            // Optional: Close all other FAQ items
+
+            // Alle anderen FAQ-Eintraege schliessen (nur einer gleichzeitig offen)
             document.querySelectorAll('.faq-item').forEach(otherItem => {
                 if (otherItem !== item) {
                     otherItem.classList.remove('active');
                 }
             });
-            
-            // Toggle current item
+
+            // Aktuellen Eintrag togglen
             item.classList.toggle('active', !wasActive);
         });
     });
-    
-    // Event Listeners - Auto-save config
-    [painFormatSelect, initiatorNameInput, executionDateInput, creditorNameInput, 
-     creditorIBANInput, creditorBICInput, creditorIdInput, sequenceTypeSelect, 
+
+    // ============================================================
+    // Event-Listener: Auto-Save bei Feldaenderungen
+    // ============================================================
+    // Jede Aenderung an Konfigurationsfeldern wird automatisch
+    // im localStorage gespeichert (fuer Wiederherstellen beim naechsten Besuch)
+
+    [painFormatSelect, initiatorNameInput, executionDateInput, creditorNameInput,
+     creditorIBANInput, creditorBICInput, creditorIdInput, sequenceTypeSelect,
      localInstrumentationSelect, debtorNameInput, debtorIBANInput, debtorBICInput].forEach(el => {
         if (el) el.addEventListener('change', saveConfigToStorage);
     });
-    
-    // Event Listeners - Config File Management
+
+    // ============================================================
+    // Event-Listener: Konfigurationsdatei-Verwaltung
+    // ============================================================
+
+    /** Verstecktes File-Input fuer JSON-Config-Upload */
     const configFileInput = document.getElementById('configFileInput');
+    /** Button: Konfiguration laden */
     const loadConfigBtn = document.getElementById('loadConfig');
+    /** Button: Konfiguration als JSON speichern */
     const saveConfigBtn = document.getElementById('saveConfig');
-    
-    // Save config to file
+
+    // Konfiguration als JSON-Datei herunterladen
     if (saveConfigBtn) {
         saveConfigBtn.addEventListener('click', saveConfigToFile);
     }
-    
-    // Load config from file
+
+    // Konfiguration aus JSON-Datei laden
     if (loadConfigBtn && configFileInput) {
+        // Klick auf "Laden"-Button oeffnet den versteckten File-Input
         loadConfigBtn.addEventListener('click', () => {
             configFileInput.click();
         });
-        
+
+        // Wenn eine Datei ausgewaehlt wurde: JSON parsen und in Formularfelder laden
         configFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             const reader = new FileReader();
             reader.onload = function(event) {
                 try {
                     const config = JSON.parse(event.target.result);
-                    
-                    // Load config into form fields
+
+                    // Alle Felder aus der Config-Datei in die Formularfelder uebertragen
                     if (config.initiatorName) initiatorNameInput.value = config.initiatorName;
                     if (config.executionDate) executionDateInput.value = config.executionDate;
                     if (config.creditorName) creditorNameInput.value = config.creditorName;
@@ -171,14 +309,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (config.debtorIBAN) debtorIBANInput.value = config.debtorIBAN;
                     if (config.debtorBIC) debtorBICInput.value = config.debtorBIC;
                     if (config.painFormat) painFormatSelect.value = config.painFormat;
-                    
-                    // Save to localStorage
+
+                    // Geladene Werte auch im localStorage sichern
                     saveConfigToStorage();
-                    
-                    // Show success message
+
                     showSuccess('Konfiguration erfolgreich geladen!');
-                    
-                    // Clear file input
+
+                    // File-Input zuruecksetzen (damit dieselbe Datei erneut geladen werden kann)
                     configFileInput.value = '';
                 } catch (error) {
                     showError('Fehler beim Laden der Konfigurationsdatei: ' + error.message);
@@ -187,26 +324,36 @@ document.addEventListener('DOMContentLoaded', function() {
             reader.readAsText(file);
         });
     }
-    
+
+    // ============================================================
+    // Zahlungsart-Umschaltung
+    // ============================================================
+
     /**
-     * Switch between Direct Debit and Transfer
+     * Wechselt zwischen Lastschrift und Ueberweisung.
+     * Aktualisiert die UI (Buttons, Einstellungen, Pain-Format-Optionen)
+     * und setzt die Transaktionsliste zurueck.
+     *
+     * @param {string} type - 'directDebit' oder 'transfer'
      */
     function switchPaymentType(type) {
         currentPaymentType = type;
-        
-        // Update buttons
+
+        // Aktiven Button hervorheben
         directDebitBtn.classList.toggle('active', type === 'directDebit');
         transferBtn.classList.toggle('active', type === 'transfer');
-        
-        // Update settings visibility
+
+        // Zahlungsart-spezifische Einstellungen ein-/ausblenden
         directDebitSettings.style.display = type === 'directDebit' ? 'block' : 'none';
         transferSettings.style.display = type === 'transfer' ? 'block' : 'none';
-        
-        // Update info visibility
+
+        // Info-Boxen (Excel-Spalten-Hinweise) ein-/ausblenden
         if (directDebitInfo) directDebitInfo.style.display = type === 'directDebit' ? 'block' : 'none';
         if (transferInfo) transferInfo.style.display = type === 'transfer' ? 'block' : 'none';
-        
-        // Update manual input label
+
+        // Label des Referenzfeldes anpassen:
+        // Lastschrift: "Mandatsreferenz *" (Pflichtfeld)
+        // Ueberweisung: "Referenz" (optional)
         if (type === 'directDebit') {
             manualReferenceLabel.textContent = 'Mandatsreferenz *';
             manualReference.placeholder = 'MAND-001-2025';
@@ -215,17 +362,23 @@ document.addEventListener('DOMContentLoaded', function() {
             manualReference.placeholder = 'Optional';
             manualReference.removeAttribute('required');
         }
-        
-        // Update pain format options
+
+        // Pain-Format-Dropdown mit passenden Optionen befuellen
         updatePainFormatOptions(type);
-        
-        // Reset transactions
+
+        // Transaktionsliste zuruecksetzen (da Formate unterschiedlich sind)
         currentTransactions = [];
         updatePreview();
     }
-    
+
+    // ============================================================
+    // Eingabemethode-Umschaltung
+    // ============================================================
+
     /**
-     * Switch between Excel and Manual input
+     * Wechselt zwischen Excel-Upload und manueller Eingabe.
+     *
+     * @param {string} method - 'excel' oder 'manual'
      */
     function switchInputMethod(method) {
         excelTab.classList.toggle('active', method === 'excel');
@@ -233,9 +386,24 @@ document.addEventListener('DOMContentLoaded', function() {
         excelInputMethod.classList.toggle('active', method === 'excel');
         manualInputMethod.classList.toggle('active', method === 'manual');
     }
-    
+
+    // ============================================================
+    // Pain-Format-Optionen
+    // ============================================================
+
     /**
-     * Update pain format options based on payment type
+     * Aktualisiert die Pain-Format-Dropdown-Optionen basierend auf der Zahlungsart.
+     *
+     * Lastschrift (pain.008):
+     *   - pain.008.001.02 (aeltere Version)
+     *   - pain.008.001.08 (empfohlen)
+     *
+     * Ueberweisung (pain.001):
+     *   - pain.001.001.03 (aeltere Version)
+     *   - pain.001.001.08 (neuere Version)
+     *   - pain.001.001.09 (empfohlen)
+     *
+     * @param {string} type - 'directDebit' oder 'transfer'
      */
     function updatePainFormatOptions(type) {
         const options = type === 'directDebit' ? [
@@ -246,7 +414,8 @@ document.addEventListener('DOMContentLoaded', function() {
             { value: 'pain.001.001.08', text: 'pain.001.001.08 (Neuere Version)' },
             { value: 'pain.001.001.09', text: 'pain.001.001.09 (Neueste Version - EMPFOHLEN) ⭐', selected: true }
         ];
-        
+
+        // Dropdown leeren und mit neuen Optionen befuellen
         painFormatSelect.innerHTML = '';
         options.forEach(opt => {
             const option = document.createElement('option');
@@ -256,24 +425,38 @@ document.addEventListener('DOMContentLoaded', function() {
             painFormatSelect.appendChild(option);
         });
     }
-    
+
+    // ============================================================
+    // Validierungsfunktionen
+    // ============================================================
+    // Jede Funktion wird bei 'input'/'change' Events aufgerufen und
+    // zeigt visuelles Feedback (gruen/rot + Nachricht) am jeweiligen Feld.
+
     /**
-     * Validate IBAN and show feedback
+     * Validiert eine IBAN: Format-Pruefung und Laengen-Check.
+     * Format: 2 Buchstaben (Laendercode) + 2 Ziffern (Pruefziffer) + 1-30 alphanumerische Zeichen
+     * Laenge: 15-34 Zeichen
+     *
+     * Hinweis: Die echte Mod-97-Pruefziffer wird in sepa.min.js bei der XML-Generierung geprueft.
+     * Hier erfolgt nur eine Vorpruefung fuer sofortiges UI-Feedback.
+     *
+     * @param {Event} e - Input-Event mit e.target als Eingabefeld
      */
     function validateIBAN(e) {
         const input = e.target;
         const iban = input.value.replace(/\s/g, '').toUpperCase();
-        
+
+        // Leeres Feld: Validierungsstatus zuruecksetzen
         if (iban.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
-        // Basic IBAN validation
+
+        // IBAN-Format pruefen (Basis-Regex + Laengencheck)
         const ibanRegex = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/;
         const isValid = ibanRegex.test(iban) && iban.length >= 15 && iban.length <= 34;
-        
+
         if (isValid) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -284,24 +467,27 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Ungültige IBAN (Format: DE89370400440532013000)', 'error');
         }
     }
-    
+
     /**
-     * Validate BIC and show feedback
+     * Validiert einen BIC (Bank Identifier Code).
+     * Format: 6 Buchstaben + 2 alphanumerische Zeichen + optional 3 alphanumerische Zeichen
+     * Laenge: 8 oder 11 Zeichen
+     *
+     * @param {Event} e - Input-Event
      */
     function validateBIC(e) {
         const input = e.target;
         const bic = input.value.trim().toUpperCase();
-        
+
         if (bic.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
-        // BIC validation (8 or 11 characters)
+
         const bicRegex = /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
         const isValid = bicRegex.test(bic);
-        
+
         if (isValid) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -312,20 +498,23 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Ungültiger BIC (8 oder 11 Zeichen)', 'error');
         }
     }
-    
+
     /**
-     * Validate Amount
+     * Validiert einen Betrag.
+     * Erlaubt: 0.01 bis 999.999.999,99 EUR
+     *
+     * @param {Event} e - Input-Event
      */
     function validateAmount(e) {
         const input = e.target;
         const amount = parseFloat(input.value);
-        
+
         if (input.value.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
+
         if (!isNaN(amount) && amount >= 0.01 && amount <= 999999999.99) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -336,20 +525,22 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Betrag muss zwischen 0.01 und 999,999,999.99 EUR liegen', 'error');
         }
     }
-    
+
     /**
-     * Validate Name fields
+     * Validiert Namensfelder (2-70 Zeichen, SEPA-konform).
+     *
+     * @param {Event} e - Input-Event
      */
     function validateName(e) {
         const input = e.target;
         const name = input.value.trim();
-        
+
         if (name.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
+
         if (name.length >= 2 && name.length <= 70) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -360,20 +551,22 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Name muss 2-70 Zeichen lang sein', 'error');
         }
     }
-    
+
     /**
-     * Validate Remittance Info
+     * Validiert den Verwendungszweck (max. 140 Zeichen lt. SEPA-Standard).
+     *
+     * @param {Event} e - Input-Event
      */
     function validateRemittance(e) {
         const input = e.target;
         const text = input.value.trim();
-        
+
         if (text.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
+
         if (text.length >= 1 && text.length <= 140) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -384,20 +577,25 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Verwendungszweck darf maximal 140 Zeichen haben', 'error');
         }
     }
-    
+
     /**
-     * Validate Reference/Mandate
+     * Validiert die Referenz bzw. Mandatsreferenz.
+     * Bei Lastschrift: Pflichtfeld (1-35 Zeichen)
+     * Bei Ueberweisung: Optional (0-35 Zeichen)
+     *
+     * @param {Event} e - Input-Event
      */
     function validateReference(e) {
         const input = e.target;
         const ref = input.value.trim();
-        
+
+        // Bei Ueberweisung ist das Feld optional - leeres Feld ist ok
         if (ref.length === 0 && currentPaymentType !== 'directDebit') {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
+
         if (ref.length >= 1 && ref.length <= 35) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -407,29 +605,34 @@ document.addEventListener('DOMContentLoaded', function() {
             input.classList.add('invalid');
             showValidationMessage(input, '✗ Maximal 35 Zeichen', 'error');
         } else if (currentPaymentType === 'directDebit') {
+            // Bei Lastschrift: Leeres Feld ist ein Fehler
             input.classList.remove('valid');
             input.classList.add('invalid');
             showValidationMessage(input, '✗ Pflichtfeld für Lastschriften', 'error');
         }
     }
-    
+
     /**
-     * Validate Creditor ID
+     * Validiert die Glaeubigeor-Identifikationsnummer.
+     * Format: 2 Buchstaben (Land) + 2 Ziffern (Pruefziffer) + 3 alphanumerisch + 11 Ziffern
+     * Beispiel: DE98ZZZ09999999999
+     *
+     * @param {Event} e - Input-Event
      */
     function validateCreditorId(e) {
         const input = e.target;
         const id = input.value.trim().toUpperCase();
-        
+
         if (id.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
-        // German Creditor ID format: DE98ZZZ09999999999
+
+        // Deutsches Glaeubigeor-ID-Format
         const creditorIdRegex = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{3}[0-9]{11}$/;
         const isValid = creditorIdRegex.test(id);
-        
+
         if (isValid) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -440,24 +643,27 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Format: DE98ZZZ09999999999', 'error');
         }
     }
-    
+
     /**
-     * Validate Date
+     * Validiert das Ausfuehrungsdatum (muss in der Zukunft liegen).
+     * Zeigt die Differenz in Tagen zum heutigen Datum an.
+     *
+     * @param {Event} e - Input-Event
      */
     function validateDate(e) {
         const input = e.target;
         const dateValue = input.value;
-        
+
         if (dateValue.length === 0) {
             input.classList.remove('valid', 'invalid');
             removeValidationMessage(input);
             return;
         }
-        
+
         const selectedDate = new Date(dateValue);
         const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
+        today.setHours(0, 0, 0, 0);  // Nur Datum vergleichen, ohne Uhrzeit
+
         if (selectedDate >= today) {
             input.classList.remove('invalid');
             input.classList.add('valid');
@@ -469,13 +675,15 @@ document.addEventListener('DOMContentLoaded', function() {
             showValidationMessage(input, '✗ Datum muss in der Zukunft liegen', 'error');
         }
     }
-    
+
     /**
-     * Validate Select fields
+     * Validiert Select-Felder (visuelles Feedback bei gueliger Auswahl).
+     *
+     * @param {Event} e - Change-Event
      */
     function validateSelect(e) {
         const select = e.target;
-        
+
         if (select.value && select.value !== '') {
             select.classList.remove('invalid');
             select.classList.add('valid');
@@ -484,23 +692,34 @@ document.addEventListener('DOMContentLoaded', function() {
             select.classList.add('invalid');
         }
     }
-    
+
+    // ============================================================
+    // Validierungs-UI-Hilfsfunktionen
+    // ============================================================
+
     /**
-     * Show validation message
+     * Zeigt eine Validierungsnachricht unterhalb eines Eingabefeldes an.
+     *
+     * @param {HTMLElement} input - Das Eingabefeld
+     * @param {string} message - Nachrichtentext
+     * @param {string} type - 'success' (gruen) oder 'error' (rot)
      */
     function showValidationMessage(input, message, type) {
+        // Vorherige Nachricht entfernen
         removeValidationMessage(input);
-        
+
         const msgDiv = document.createElement('div');
         msgDiv.className = `validation-message ${type}`;
         msgDiv.textContent = message;
         msgDiv.dataset.validationFor = input.id || input.name;
-        
+
         input.parentElement.appendChild(msgDiv);
     }
-    
+
     /**
-     * Remove validation message
+     * Entfernt die Validierungsnachricht unter einem Eingabefeld.
+     *
+     * @param {HTMLElement} input - Das Eingabefeld
      */
     function removeValidationMessage(input) {
         const existingMsg = input.parentElement.querySelector('.validation-message');
@@ -508,60 +727,68 @@ document.addEventListener('DOMContentLoaded', function() {
             existingMsg.remove();
         }
     }
-    
+
     /**
-     * Validate all fields (called after loading config)
+     * Validiert alle Formularfelder (wird nach dem Laden der Konfiguration aufgerufen).
+     * Simuliert Input-Events fuer alle vorausgefuellten Felder.
      */
     function validateAllFields() {
-        // IBAN fields
+        // IBAN-Felder
         if (manualIBAN.value) validateIBAN({ target: manualIBAN });
         if (creditorIBANInput.value) validateIBAN({ target: creditorIBANInput });
         if (debtorIBANInput.value) validateIBAN({ target: debtorIBANInput });
-        
-        // BIC fields
+
+        // BIC-Felder
         if (manualBIC.value) validateBIC({ target: manualBIC });
         if (creditorBICInput.value) validateBIC({ target: creditorBICInput });
         if (debtorBICInput.value) validateBIC({ target: debtorBICInput });
-        
-        // Name fields
+
+        // Name-Felder
         if (manualName.value) validateName({ target: manualName });
         if (creditorNameInput.value) validateName({ target: creditorNameInput });
         if (debtorNameInput.value) validateName({ target: debtorNameInput });
         if (initiatorNameInput.value) validateName({ target: initiatorNameInput });
-        
-        // Amount
+
+        // Betrag
         if (manualAmount.value) validateAmount({ target: manualAmount });
-        
-        // Text fields
+
+        // Text-Felder
         if (manualRemittance.value) validateRemittance({ target: manualRemittance });
         if (manualReference.value) validateReference({ target: manualReference });
         if (creditorIdInput.value) validateCreditorId({ target: creditorIdInput });
-        
-        // Date
+
+        // Datum
         if (executionDateInput.value) validateDate({ target: executionDateInput });
-        
-        // Selects
+
+        // Select-Felder
         if (painFormatSelect.value) validateSelect({ target: painFormatSelect });
         if (sequenceTypeSelect.value) validateSelect({ target: sequenceTypeSelect });
         if (localInstrumentationSelect.value) validateSelect({ target: localInstrumentationSelect });
     }
-    
+
+    // ============================================================
+    // Manuelle Transaktions-Eingabe
+    // ============================================================
+
     /**
-     * Add manual transaction
+     * Fuegt eine manuell eingegebene Transaktion zur Liste hinzu.
+     * Validiert die Pflichtfelder, erstellt ein Transaktions-Objekt,
+     * leert das Formular und aktualisiert die Vorschau.
      */
     function addManualTransaction() {
-        // Validate inputs
+        // Pflichtfelder pruefen
         if (!manualName.value || !manualIBAN.value || !manualAmount.value || !manualRemittance.value) {
             showError('Bitte füllen Sie alle Pflichtfelder aus!');
             return;
         }
-        
+
+        // Bei Lastschrift ist die Mandatsreferenz Pflicht
         if (currentPaymentType === 'directDebit' && !manualReference.value) {
             showError('Mandatsreferenz ist erforderlich für Lastschriften!');
             return;
         }
-        
-        // Create transaction object
+
+        // Transaktions-Objekt erstellen
         const transaction = {
             name: manualName.value.trim(),
             iban: manualIBAN.value.replace(/\s/g, '').toUpperCase(),
@@ -569,54 +796,68 @@ document.addEventListener('DOMContentLoaded', function() {
             amount: parseFloat(manualAmount.value),
             remittanceInfo: manualRemittance.value.trim(),
             mandateId: manualReference.value.trim() || '',
+            // Mandats-Unterschriftsdatum: Heutiges Datum als Standard
             mandateSignatureDate: new Date().toISOString().split('T')[0]
         };
-        
-        // Add to transactions
+
+        // Zur Transaktionsliste hinzufuegen
         currentTransactions.push(transaction);
-        
-        // Clear form and validation
+
+        // Formular leeren
         manualName.value = '';
         manualIBAN.value = '';
         manualBIC.value = '';
         manualAmount.value = '';
         manualRemittance.value = '';
         manualReference.value = '';
-        
-        // Remove validation classes and messages
+
+        // Validierungsstatus und -nachrichten zuruecksetzen
         [manualName, manualIBAN, manualBIC, manualAmount, manualRemittance, manualReference].forEach(field => {
             field.classList.remove('valid', 'invalid');
             removeValidationMessage(field);
         });
-        
-        // Update preview
+
+        // Vorschautabelle aktualisieren
         updatePreview();
-        
-        // Show success feedback
+
+        // Erfolgs-Feedback anzeigen
         showSuccess(`✓ Zahlung hinzugefügt! Insgesamt: ${currentTransactions.length}`);
     }
-    
+
+    // ============================================================
+    // Excel-Datei-Import
+    // ============================================================
+
     /**
-     * Handle Excel file selection
+     * Verarbeitet eine hochgeladene Excel-Datei (.xlsx/.xls).
+     * Liest die erste Tabelle, erkennt die Spalten flexibel (deutsch/englisch, gross/klein)
+     * und wandelt die Zeilen in Transaktions-Objekte um.
+     *
+     * Erwartete Spalten Lastschrift: Name, IBAN, BIC, Betrag, Verwendungszweck, Mandatsreferenz, Mandatsdatum
+     * Erwartete Spalten Ueberweisung: Name, IBAN, BIC, Betrag, Verwendungszweck, Referenz
+     *
+     * @param {Event} e - Change-Event des File-Inputs
      */
     async function handleFileSelect(e) {
         const file = e.target.files[0];
         if (!file) return;
-        
+
         fileName.textContent = `📄 ${file.name}`;
         hideError();
-        
+
         try {
+            // Excel-Datei als ArrayBuffer lesen und mit XLSX parsen
             const data = await file.arrayBuffer();
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(firstSheet);
-            
+
             if (rows.length === 0) {
                 throw new Error('Die Excel-Datei enthält keine Daten.');
             }
-            
-            // Parse transactions
+
+            // Zeilen in Transaktions-Objekte umwandeln
+            // Spaltennamen werden flexibel erkannt (deutsch/englisch, Gross-/Kleinschreibung)
             currentTransactions = rows.map(row => {
                 const transaction = {
                     name: row.Name || row.name || '',
@@ -625,45 +866,52 @@ document.addEventListener('DOMContentLoaded', function() {
                     amount: parseFloat(row.Betrag || row.betrag || row.Amount || row.amount || 0),
                     remittanceInfo: row.Verwendungszweck || row.verwendungszweck || row.Purpose || row.purpose || ''
                 };
-                
-                // Add mandate info for direct debits
+
+                // Lastschrift: Mandatsinformationen aus zusaetzlichen Spalten lesen
                 if (currentPaymentType === 'directDebit') {
                     transaction.mandateId = row.Mandatsreferenz || row.mandatsreferenz || row.MandateId || row.mandateId || '';
                     transaction.mandateSignatureDate = row.Mandatsdatum || row.mandatsdatum || row.MandateDate || row.mandateDate || '';
                 } else {
-                    // For transfers, read Reference
+                    // Ueberweisung: Referenz aus optionaler Spalte lesen
                     transaction.mandateId = row.Referenz || row.referenz || row.Reference || row.reference || '';
                 }
-                
+
                 return transaction;
             });
-            
+
+            // Vorschautabelle aktualisieren
             updatePreview();
-            
+
         } catch (error) {
             showError(`Fehler beim Lesen der Datei: ${error.message}`);
             console.error(error);
         }
     }
-    
+
+    // ============================================================
+    // Vorschautabelle
+    // ============================================================
+
     /**
-     * Update preview table
+     * Aktualisiert die Vorschautabelle mit allen aktuellen Transaktionen.
+     * Zeigt Zusammenfassung (Anzahl, Gesamtbetrag) und eine Tabelle mit
+     * allen Transaktionen inkl. Loeschen-Button.
      */
     function updatePreview() {
+        // Keine Transaktionen: Vorschau ausblenden
         if (currentTransactions.length === 0) {
             previewSection.style.display = 'none';
             return;
         }
-        
+
         previewSection.style.display = 'block';
-        
-        // Calculate totals
+
+        // Zusammenfassung berechnen und anzeigen
         const totalAmount = currentTransactions.reduce((sum, t) => sum + t.amount, 0);
         const count = currentTransactions.length;
-        
         summary.textContent = `📊 Gefunden: ${count} Transaktionen | Gesamtbetrag: ${formatCurrency(totalAmount)}`;
-        
-        // Build table
+
+        // Tabellenzeilen erstellen
         previewBody.innerHTML = '';
         currentTransactions.forEach((t, index) => {
             const row = document.createElement('tr');
@@ -683,28 +931,51 @@ document.addEventListener('DOMContentLoaded', function() {
             previewBody.appendChild(row);
         });
     }
-    
-    // Make removeTransaction available globally
+
+    /**
+     * Globale Funktion zum Entfernen einer Transaktion aus der Liste.
+     * Wird ueber onclick-Attribut in den Tabellenzeilen aufgerufen.
+     *
+     * @param {number} index - Index der zu entfernenden Transaktion
+     */
     window.removeTransaction = function(index) {
         currentTransactions.splice(index, 1);
         updatePreview();
     };
-    
+
+    // ============================================================
+    // SEPA-XML-Generierung und Download
+    // ============================================================
+
     /**
-     * Generate and download SEPA XML
+     * Generiert eine SEPA-XML-Datei und loeut den Browser-Download aus.
+     *
+     * Ablauf:
+     *   1. Konfigurationsfelder validieren (Pflichtfelder pruefen)
+     *   2. SEPA.Document erstellen (mit gewaehltem Pain-Format)
+     *   3. GroupHeader konfigurieren (ID, Erstellungszeitpunkt, Initiator)
+     *   4. PaymentInfo erstellen und konfigurieren:
+     *      - Lastschrift: Glaeubigeor-Daten, Sequenztyp, Instrumentierung, Einzugsdatum
+     *      - Ueberweisung: Auftraggeber-Daten, Ausfuehrungsdatum
+     *   5. Transaktionen erstellen und hinzufuegen
+     *   6. PaymentInfo zum Dokument hinzufuegen
+     *   7. XML-String generieren (doc.toString())
+     *   8. Als Blob herunterladen
      */
     function generateAndDownload() {
+        // === Schritt 1: Validierung ===
+
         if (currentTransactions.length === 0) {
             showError('Bitte fügen Sie zuerst Transaktionen hinzu!');
             return;
         }
-        
-        // Validate configuration
+
+        // Pflichtfelder pruefen (je nach Zahlungsart)
         if (!initiatorNameInput.value) {
             showError('Bitte geben Sie den Initiator-Namen ein!');
             return;
         }
-        
+
         if (currentPaymentType === 'directDebit') {
             if (!creditorNameInput.value || !creditorIBANInput.value || !creditorIdInput.value) {
                 showError('Bitte füllen Sie alle Gläubiger-Felder aus!');
@@ -716,94 +987,123 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
         }
-        
+
         try {
-            // Create SEPA document
+            // === Schritt 2: SEPA-Dokument erstellen ===
             const painFormat = painFormatSelect.value;
             const doc = new SEPA.Document(painFormat);
-            doc.grpHdr.id = generateMessageId();
-            doc.grpHdr.created = new Date().toISOString();
+
+            // === Schritt 3: GroupHeader konfigurieren ===
+            doc.grpHdr.id = generateMessageId();       // Eindeutige Nachrichten-ID
+            doc.grpHdr.created = new Date();            // Erstellungszeitpunkt (muss Date-Objekt sein!)
             doc.grpHdr.initiatorName = initiatorNameInput.value;
-            
-            // Create payment info
+
+            // === Schritt 4: PaymentInfo erstellen und konfigurieren ===
             const info = doc.createPaymentInfo();
-            info.collectionDate = executionDateInput.value || new Date().toISOString().split('T')[0];
-            
+
+            // Ausfuehrungsdatum setzen (je nach Zahlungsart unterschiedliches Feld)
+            // Fallback auf heutiges Datum wenn kein Datum angegeben
             if (currentPaymentType === 'directDebit') {
-                // Direct Debit settings
+                info.collectionDate = new Date(executionDateInput.value || new Date());
+            } else {
+                info.requestedExecutionDate = new Date(executionDateInput.value || new Date());
+            }
+
+            if (currentPaymentType === 'directDebit') {
+                // --- Lastschrift-Konfiguration ---
                 info.creditorName = creditorNameInput.value;
                 info.creditorIBAN = creditorIBANInput.value.replace(/\s/g, '');
                 if (creditorBICInput.value) info.creditorBIC = creditorBICInput.value;
                 info.creditorId = creditorIdInput.value;
-                info.sequenceType = sequenceTypeSelect.value;
-                info.localInstrument = localInstrumentationSelect.value;
-                
-                // Add transactions
+                info.sequenceType = sequenceTypeSelect.value;             // FRST/RCUR/OOFF/FNAL
+                info.localInstrumentation = localInstrumentationSelect.value;  // CORE/COR1/B2B
+
+                // === Schritt 5a: Lastschrift-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
-                    transaction.debtorName = t.name;
-                    transaction.debtorIBAN = t.iban;
-                    transaction.debtorBIC = t.bic || '';
-                    transaction.amount = parseFloat(t.amount);
-                    transaction.mandateId = t.mandateId;
+                    transaction.debtorName = t.name;                       // Schuldner-Name
+                    transaction.debtorIBAN = t.iban;                       // Schuldner-IBAN
+                    transaction.debtorBIC = t.bic || '';                   // Schuldner-BIC (optional)
+                    transaction.amount = parseFloat(t.amount);             // Betrag in EUR
+                    transaction.mandateId = t.mandateId;                   // Mandatsreferenz
+
+                    // Mandats-Unterschriftsdatum: Aus Eingabe oder Fallback auf heute
                     const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
                     transaction.mandateSignatureDate = isNaN(d.getTime()) ? new Date() : d;
-                    transaction.remittanceInfo = t.remittanceInfo;
-                    
+
+                    transaction.remittanceInfo = t.remittanceInfo;          // Verwendungszweck
+
                     info.addTransaction(transaction);
                 });
             } else {
-                // Credit Transfer settings
+                // --- Ueberweisungs-Konfiguration ---
                 info.debtorName = debtorNameInput.value;
                 info.debtorIBAN = debtorIBANInput.value.replace(/\s/g, '');
                 if (debtorBICInput.value) info.debtorBIC = debtorBICInput.value;
-                
-                // Add transactions
+
+                // === Schritt 5b: Ueberweisungs-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
-                    transaction.creditorName = t.name;
-                    transaction.creditorIBAN = t.iban;
-                    transaction.creditorBIC = t.bic || '';
-                    transaction.amount = parseFloat(t.amount);
-                    transaction.remittanceInfo = t.remittanceInfo;
+                    transaction.creditorName = t.name;                     // Empfaenger-Name
+                    transaction.creditorIBAN = t.iban;                     // Empfaenger-IBAN
+                    transaction.creditorBIC = t.bic || '';                 // Empfaenger-BIC (optional)
+                    transaction.amount = parseFloat(t.amount);             // Betrag in EUR
+                    transaction.remittanceInfo = t.remittanceInfo;          // Verwendungszweck
+                    // Ende-zu-Ende-Referenz: Nutzer-Referenz oder Fallback "NOTPROVIDED"
                     transaction.end2endId = t.mandateId || 'NOTPROVIDED';
-                    
+
                     info.addTransaction(transaction);
                 });
             }
-            
-            // Generate XML
+
+            // === Schritt 6: PaymentInfo zum Dokument hinzufuegen ===
+            // WICHTIG: Ohne diesen Aufruf wuerde das XML-Dokument leer sein
+            // (keine Zahlungsdaten im <PmtInf>-Block)
+            doc.addPaymentInfo(info);
+
+            // === Schritt 7: XML-String generieren ===
             const xml = doc.toString();
-            
-            // Download file
+
+            // === Schritt 8: Download ausloesen ===
             const blob = new Blob([xml], { type: 'application/xml' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            
+
+            // Dateiname: YYYY-MM-DD_SEPA_Lastschrift.xml bzw. _Überweisung.xml
             const date = new Date().toISOString().split('T')[0];
             const type = currentPaymentType === 'directDebit' ? 'Lastschrift' : 'Überweisung';
             a.download = `${date}_SEPA_${type}.xml`;
-            
+
+            // Unsichtbaren Link erstellen, klicken und aufraeuamen
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            
+
             showSuccess('✓ SEPA-XML-Datei erfolgreich erstellt und heruntergeladen!');
-            
+
         } catch (error) {
             showError(`Fehler beim Generieren der XML: ${error.message}`);
             console.error(error);
         }
     }
-    
+
+    // ============================================================
+    // Excel-Vorlage-Download
+    // ============================================================
+
     /**
-     * Download Excel template
+     * Erstellt eine Excel-Vorlage mit Beispieldaten und loeut den Download aus.
+     * Die Vorlage enthaelt die erwarteten Spaltennamen und 2 Beispielzeilen.
+     *
+     * Lastschrift-Vorlage: Name, IBAN, BIC, Betrag, Verwendungszweck, Mandatsreferenz, Mandatsdatum
+     * Ueberweisungs-Vorlage: Name, IBAN, BIC, Betrag, Verwendungszweck, Referenz
      */
     function downloadExcelTemplate() {
         const wb = XLSX.utils.book_new();
-        
+
+        // Beispieldaten je nach Zahlungsart
         let data;
         if (currentPaymentType === 'directDebit') {
             data = [
@@ -818,45 +1118,59 @@ document.addEventListener('DOMContentLoaded', function() {
                 ['Erika Musterfrau', 'DE89370400440532013001', '', 2000.00, 'Gehalt Januar 2025', 'REF-002']
             ];
         }
-        
+
         const ws = XLSX.utils.aoa_to_sheet(data);
-        
-        // Set column widths
+
+        // Spaltenbreiten fuer bessere Lesbarkeit
         ws['!cols'] = [
-            { wch: 25 }, // Name
-            { wch: 30 }, // IBAN
-            { wch: 15 }, // BIC
-            { wch: 10 }, // Betrag
-            { wch: 35 }, // Verwendungszweck
-            { wch: 20 }, // Mandatsreferenz
-            { wch: 15 }  // Mandatsdatum
+            { wch: 25 },  // Name
+            { wch: 30 },  // IBAN
+            { wch: 15 },  // BIC
+            { wch: 10 },  // Betrag
+            { wch: 35 },  // Verwendungszweck
+            { wch: 20 },  // Mandatsreferenz/Referenz
+            { wch: 15 }   // Mandatsdatum (nur Lastschrift)
         ];
-        
+
         XLSX.utils.book_append_sheet(wb, ws, 'Transaktionen');
-        
+
+        // Dateiname: SEPA_Lastschrift_Vorlage.xlsx bzw. SEPA_Überweisung_Vorlage.xlsx
         const type = currentPaymentType === 'directDebit' ? 'Lastschrift' : 'Überweisung';
         XLSX.writeFile(wb, `SEPA_${type}_Vorlage.xlsx`);
-        
+
         showSuccess('✓ Excel-Vorlage heruntergeladen! Füllen Sie diese aus und laden Sie sie wieder hoch.');
     }
-    
+
+    // ============================================================
+    // Zuruecksetzen
+    // ============================================================
+
     /**
-     * Reset application
+     * Setzt die Anwendung zurueck: Loescht alle Transaktionen und den Datei-Upload.
+     * Erfordert eine Bestaetigung durch den Benutzer.
      */
     function resetApp() {
         if (!confirm('Möchten Sie wirklich alle Transaktionen löschen und von vorne beginnen?')) {
             return;
         }
-        
+
         currentTransactions = [];
         fileInput.value = '';
         fileName.textContent = '';
         updatePreview();
         hideError();
     }
-    
+
+    // ============================================================
+    // Konfigurationsverwaltung: localStorage
+    // ============================================================
+
     /**
-     * Save configuration to localStorage
+     * Speichert die aktuelle Konfiguration im localStorage des Browsers.
+     * Wird bei jeder Feldaenderung automatisch aufgerufen (Auto-Save).
+     *
+     * Gespeicherte Felder: Zahlungsart, Pain-Format, Initiator, Datum,
+     * Glaeubigeor-Daten, Sequenztyp, Instrumentierung, Auftraggeber-Daten.
      */
     function saveConfigToStorage() {
         const config = {
@@ -874,16 +1188,24 @@ document.addEventListener('DOMContentLoaded', function() {
             debtorIBAN: debtorIBANInput.value,
             debtorBIC: debtorBICInput.value
         };
-        
+
         try {
             localStorage.setItem('sepaConfig', JSON.stringify(config));
         } catch (e) {
+            // localStorage kann voll sein oder im privaten Modus blockiert
             console.warn('Could not save config to localStorage:', e);
         }
     }
-    
+
+    // ============================================================
+    // Konfigurationsverwaltung: JSON-Datei
+    // ============================================================
+
     /**
-     * Save configuration to file
+     * Speichert die aktuelle Konfiguration als JSON-Datei (Download).
+     * Die Datei kann spaeter wieder geladen werden, auch auf anderen Geraeten.
+     *
+     * Dateiname: sepa-config-YYYY-MM-DD.json
      */
     function saveConfigToFile() {
         const config = {
@@ -901,11 +1223,11 @@ document.addEventListener('DOMContentLoaded', function() {
             debtorIBAN: debtorIBANInput.value,
             debtorBIC: debtorBICInput.value
         };
-        
-        // Create JSON string with nice formatting
+
+        // JSON mit Einrueckung fuer Lesbarkeit formatieren
         const jsonString = JSON.stringify(config, null, 2);
-        
-        // Create blob and download
+
+        // JSON-Datei als Download ausloesen
         const blob = new Blob([jsonString], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -915,22 +1237,25 @@ document.addEventListener('DOMContentLoaded', function() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        // Show success message
+
         showSuccess('Konfiguration erfolgreich als Datei gespeichert!');
     }
-    
+
     /**
-     * Load configuration from localStorage
+     * Laedt die Konfiguration aus dem localStorage und befuellt die Formularfelder.
+     * Wird beim Seitenstart aufgerufen, um die letzte Konfiguration wiederherzustellen.
      */
     function loadConfigFromStorage() {
         try {
             const savedConfig = localStorage.getItem('sepaConfig');
             if (!savedConfig) return;
-            
+
             const config = JSON.parse(savedConfig);
-            
+
+            // Zahlungsart wiederherstellen (loeut auch UI-Aktualisierung aus)
             if (config.paymentType) switchPaymentType(config.paymentType);
+
+            // Alle Felder befuellen (nur wenn Wert vorhanden)
             if (config.painFormat) painFormatSelect.value = config.painFormat;
             if (config.initiatorName) initiatorNameInput.value = config.initiatorName;
             if (config.executionDate) executionDateInput.value = config.executionDate;
@@ -943,33 +1268,41 @@ document.addEventListener('DOMContentLoaded', function() {
             if (config.debtorName) debtorNameInput.value = config.debtorName;
             if (config.debtorIBAN) debtorIBANInput.value = config.debtorIBAN;
             if (config.debtorBIC) debtorBICInput.value = config.debtorBIC;
-            
+
         } catch (e) {
             console.warn('Could not load config from localStorage:', e);
         }
     }
-    
+
+    // ============================================================
+    // Benachrichtigungen (Erfolg/Fehler)
+    // ============================================================
+
     /**
-     * Show error message
+     * Zeigt eine Fehlermeldung im Error-Banner an und scrollt dorthin.
+     *
+     * @param {string} message - Fehlermeldungstext
      */
     function showError(message) {
         errorSection.style.display = 'block';
         errorMessage.textContent = message;
         errorSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    
+
     /**
-     * Hide error message
+     * Versteckt die Fehlermeldung.
      */
     function hideError() {
         errorSection.style.display = 'none';
     }
-    
+
     /**
-     * Show success message
+     * Zeigt eine temporaere Erfolgsmeldung als Toast-Notification an.
+     * Die Nachricht erscheint oben rechts und verschwindet nach 3 Sekunden.
+     *
+     * @param {string} message - Erfolgsmeldungstext
      */
     function showSuccess(message) {
-        // Create temporary success message
         const successDiv = document.createElement('div');
         successDiv.style.cssText = `
             position: fixed;
@@ -987,27 +1320,49 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         successDiv.textContent = message;
         document.body.appendChild(successDiv);
-        
+
+        // Nach 3 Sekunden mit Slide-Out-Animation entfernen
         setTimeout(() => {
             successDiv.style.animation = 'slideOut 0.3s ease';
             setTimeout(() => document.body.removeChild(successDiv), 300);
         }, 3000);
     }
-    
+
+    // ============================================================
+    // Hilfsfunktionen
+    // ============================================================
+
     /**
-     * Helper functions
+     * Generiert eine eindeutige Nachrichten-ID fuer den SEPA GroupHeader.
+     * Format: MSG-{timestamp}-{random}
+     *
+     * @returns {string} Eindeutige ID (z.B. "MSG-1706180400000-a1b2c3d4e")
      */
     function generateMessageId() {
         return 'MSG-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
     }
-    
+
+    /**
+     * Formatiert einen Betrag als Euro-Waehrungsstring (deutsches Format).
+     * Beispiel: 1234.56 → "1.234,56 €"
+     *
+     * @param {number} amount - Betrag
+     * @returns {string} Formatierter Waehrungsstring
+     */
     function formatCurrency(amount) {
         return new Intl.NumberFormat('de-DE', {
             style: 'currency',
             currency: 'EUR'
         }).format(amount);
     }
-    
+
+    /**
+     * Escaped HTML-Sonderzeichen in einem Text (XSS-Schutz).
+     * Verwendet ein temporaeres DOM-Element fuer sicheres Escaping.
+     *
+     * @param {string} text - Zu escapender Text
+     * @returns {string} HTML-sicherer Text
+     */
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
@@ -1015,9 +1370,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Add CSS animation for success message
+// ============================================================
+// Dynamische CSS-Animationen fuer Erfolgs-Benachrichtigungen
+// ============================================================
+// Diese Styles werden dynamisch zum <head> hinzugefuegt, da sie
+// nur fuer die JavaScript-generierten Toast-Notifications benoetigt werden.
+
 const style = document.createElement('style');
 style.textContent = `
+    /* Slide-In Animation: Toast-Notification kommt von rechts herein */
     @keyframes slideIn {
         from {
             transform: translateX(400px);
@@ -1028,7 +1389,8 @@ style.textContent = `
             opacity: 1;
         }
     }
-    
+
+    /* Slide-Out Animation: Toast-Notification gleitet nach rechts heraus */
     @keyframes slideOut {
         from {
             transform: translateX(0);
@@ -1039,7 +1401,8 @@ style.textContent = `
             opacity: 0;
         }
     }
-    
+
+    /* Loeschen-Button in der Vorschautabelle */
     .btn-remove {
         background: none;
         border: none;
@@ -1048,7 +1411,7 @@ style.textContent = `
         padding: 0.5rem;
         transition: transform 0.2s ease;
     }
-    
+
     .btn-remove:hover {
         transform: scale(1.2);
     }

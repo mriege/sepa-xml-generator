@@ -1,41 +1,85 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
+    <!-- ============================================================
+         SEPA-XML Generator - Hauptseite
+         ============================================================
+         Kostenloser, datenschutzfreundlicher SEPA-XML Generator fuer
+         Lastschriften (pain.008) und Ueberweisungen (pain.001).
+
+         Architektur:
+         - index.html  → UI-Struktur (diese Datei)
+         - style.css   → Styling, Animationen, responsive Design
+         - sepa.min.js → SEPA-Bibliothek (ISO 20022 XML-Erzeugung)
+         - sepa-generator.js → Anwendungslogik (Event-Handling,
+                               Validierung, Datentransformation)
+
+         Alle Daten werden ausschliesslich im Browser verarbeitet.
+         Es findet keinerlei Kommunikation mit externen Servern statt.
+         ============================================================ -->
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEO: Titel mit relevanten Keywords fuer Suchmaschinen -->
     <title>Kostenloser SEPA-XML Generator | Lastschrift & Überweisung | 100% Datenschutz</title>
+
+    <!-- SEO: Meta-Beschreibung fuer Google-Suchergebnisse (max. ~160 Zeichen) -->
     <meta name="description" content="Erstellen Sie SEPA-XML-Dateien für Lastschriften und Überweisungen kostenlos und sicher. Keine Anmeldung, 100% datenschutzkonform, alle Daten bleiben in Ihrem Browser. Einfach, schnell und DSGVO-konform.">
+
+    <!-- SEO: Keywords fuer Suchmaschinen-Indexierung -->
     <meta name="keywords" content="SEPA-XML Generator, SEPA Lastschrift erstellen, SEPA Überweisung, XML Generator kostenlos, SEPA pain.008, SEPA pain.001, Sammelüberweisung, Sammellastschrift, DSGVO konform, datenschutzfreundlich">
     <meta name="author" content="Webexperte.Berlin">
     <meta name="robots" content="index, follow">
-    
-    <!-- Open Graph / Facebook -->
+
+    <!-- Open Graph Meta-Tags fuer Social-Media-Vorschauen (Facebook, LinkedIn etc.) -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="Kostenloser SEPA-XML Generator - 100% Datenschutz">
     <meta property="og:description" content="Erstellen Sie SEPA-XML-Dateien für Lastschriften und Überweisungen. Kostenlos, sicher und ohne Anmeldung.">
-    
-    <!-- Favicon -->
+
+    <!-- Favicon: Inline-SVG mit Euro-Emoji als Browser-Tab-Icon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💶</text></svg>">
-    
+
+    <!-- Stylesheet: Alle visuellen Styles, Animationen und responsive Breakpoints -->
     <link rel="stylesheet" href="style.css">
+
+    <!-- SheetJS (XLSX): Externe Bibliothek zum Lesen/Schreiben von Excel-Dateien (.xlsx/.xls) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- SEPA-Bibliothek: Erzeugt ISO 20022 XML-Dokumente (pain.001 / pain.008) -->
     <script src="sepa.min.js"></script>
 </head>
 <body>
-    <!-- Hero Section -->
+
+    <!-- ============================================================
+         HERO-BEREICH
+         ============================================================
+         Erster sichtbarer Bereich der Seite. Enthaelt:
+         - Datenschutz-Badge (gruenes Pill-Label oben)
+         - Hauptueberschrift und Untertitel
+         - 4 Feature-Karten (Lokal, Sofort, Kostenlos, Bankgeprueft)
+         - Call-to-Action Button (scrollt zu #start)
+         - Trust-Indikatoren (Datenschutz, SEPA-konform, Benutzerfreundlich)
+         ============================================================ -->
     <div class="hero-section">
             <div class="hero-content">
+
+                <!-- Datenschutz-Badge: Grünes Pill-Label mit Schloss-Icon, pulsierende Animation -->
                 <div class="hero-badge">
+                    <!-- SVG: Schloss-Symbol (Bootstrap Icons) -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
                     </svg>
                     <span>100% Datenschutz - DSGVO-konform</span>
                 </div>
-                
+
+                <!-- Hauptueberschrift der Seite -->
                 <h1>SEPA-XML Generator</h1>
                 <p class="hero-subtitle">Erstellen Sie professionelle SEPA-XML-Dateien für Lastschriften und Überweisungen – kostenlos, einfach und sicher</p>
-                
+
+                <!-- Feature-Grid: 4 Karten mit den Hauptvorteilen der Anwendung -->
                 <div class="hero-features">
+                    <!-- Feature 1: Datenschutz - Lokale Verarbeitung -->
                     <div class="hero-feature">
                         <div class="feature-icon">🔒</div>
                         <div class="feature-text">
@@ -43,6 +87,7 @@
                             <span>Alle Daten bleiben in Ihrem Browser</span>
                         </div>
                     </div>
+                    <!-- Feature 2: Keine Registrierung noetig -->
                     <div class="hero-feature">
                         <div class="feature-icon">⚡</div>
                         <div class="feature-text">
@@ -50,6 +95,7 @@
                             <span>Keine Registrierung erforderlich</span>
                         </div>
                     </div>
+                    <!-- Feature 3: Kostenlos und unbegrenzt nutzbar -->
                     <div class="hero-feature">
                         <div class="feature-icon">💯</div>
                         <div class="feature-text">
@@ -57,6 +103,7 @@
                             <span>Unbegrenzte Nutzung, keine Gebühren</span>
                         </div>
                     </div>
+                    <!-- Feature 4: Kompatibel mit allen gaengigen Banking-Systemen -->
                     <div class="hero-feature">
                         <div class="feature-icon">✅</div>
                         <div class="feature-text">
@@ -65,20 +112,30 @@
                         </div>
                     </div>
                 </div>
-                
+
+                <!-- Call-to-Action: Scrollt zum Anker #start (3-Schritte-Uebersicht) -->
                 <div class="hero-cta">
                     <a href="#start" class="cta-button">
                         <span>Jetzt SEPA-XML erstellen</span>
+                        <!-- SVG: Pfeil-nach-rechts (Bootstrap Icons) -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                             <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/>
                         </svg>
                     </a>
                 </div>
             </div>
-            
-            <!-- Trust Indicators -->
+
+            <!-- ============================================================
+                 TRUST-INDIKATOREN
+                 ============================================================
+                 Drei Vertrauens-Karten unterhalb des Hero-Bereichs.
+                 Weisser Hintergrund mit abgerundeten Ecken, ueberlappt
+                 optisch den Hero-Bereich durch negativen Margin.
+                 ============================================================ -->
             <div class="trust-section">
+                <!-- Trust 1: Keine Datenuebertragung -->
                 <div class="trust-item">
+                    <!-- SVG: Schloss-Symbol -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
                     </svg>
@@ -87,7 +144,9 @@
                         <p>Ihre Bankdaten verlassen niemals Ihren Computer</p>
                     </div>
                 </div>
+                <!-- Trust 2: SEPA-Standardkonformitaet -->
                 <div class="trust-item">
+                    <!-- SVG: Haekchen im Kreis -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
                         <path d="m10.97 4.97-.02.022-3.473 4.425-2.093-2.094a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/>
@@ -97,7 +156,9 @@
                         <p>Alle pain.008 und pain.001 Formate unterstützt</p>
                     </div>
                 </div>
+                <!-- Trust 3: Einsteigerfreundlichkeit -->
                 <div class="trust-item">
+                    <!-- SVG: Smiley-Gesicht -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zM7 6.5C7 7.328 6.552 8 6 8s-1-.672-1-1.5S5.448 5 6 5s1 .672 1 1.5zM4.285 9.567a.5.5 0 0 1 .683.183A3.498 3.498 0 0 0 8 11.5a3.498 3.498 0 0 0 3.032-1.75.5.5 0 1 1 .866.5A4.498 4.498 0 0 1 8 12.5a4.498 4.498 0 0 1-3.898-2.25.5.5 0 0 1 .183-.683zM10 8c-.552 0-1-.672-1-1.5S9.448 5 10 5s1 .672 1 1.5S10.552 8 10 8z"/>
                     </svg>
@@ -108,9 +169,24 @@
                 </div>
             </div>
         </div>
-    </div>
 
+    <!-- ============================================================
+         HAUPTCONTAINER
+         ============================================================
+         Zentrierter Container (max-width: 1200px) fuer den gesamten
+         Anwendungsinhalt unterhalb des Hero-Bereichs.
+         ============================================================ -->
     <div class="container">
+
+        <!-- ============================================================
+             3-SCHRITTE-UEBERSICHT
+             ============================================================
+             Anker #start als Sprungziel fuer den CTA-Button.
+             Zeigt die drei Hauptschritte als Vorschaukarten:
+             1. Zahlungsart waehlen
+             2. Daten eingeben
+             3. XML erstellen
+             ============================================================ -->
         <header id="start">
             <h2>So funktioniert's – in 3 einfachen Schritten</h2>
             <div class="steps-overview">
@@ -133,16 +209,35 @@
         </header>
 
         <main>
-            <!-- Step 1: Payment Type Selection -->
+
+            <!-- ============================================================
+                 SCHRITT 1: ZAHLUNGSART WAEHLEN
+                 ============================================================
+                 Zwei grosse Auswahlkarten fuer Lastschrift (directDebit)
+                 und Ueberweisung (transfer).
+
+                 JavaScript-Logik (sepa-generator.js):
+                 - Klick auf eine Karte setzt currentPaymentType
+                 - Zeigt/versteckt die zugehoerigen Konfigurationsfelder
+                 - Aktualisiert die pain-Format-Optionen im Select
+                 - Aktualisiert Labels und Spaltennamen in der Vorschau
+                 ============================================================ -->
             <div class="step-section">
                 <div class="step-header">
                     <span class="step-number">1</span>
                     <h2>Was möchten Sie tun?</h2>
                 </div>
                 <p class="step-description">Wählen Sie, ob Sie Geld von Kunden einziehen oder an Empfänger überweisen möchten.</p>
-                
+
                 <div class="payment-type-buttons">
+                    <!--
+                        Lastschrift-Button:
+                        - data-type="directDebit" wird von JS ausgelesen
+                        - .active-Klasse zeigt Auswahlstatus (gruenes Haekchen via CSS ::before)
+                        - Tooltip erklaert den Unterschied zu Ueberweisungen
+                    -->
                     <button id="directDebitBtn" class="payment-type-btn active" data-type="directDebit">
+                        <!-- SVG: Kreditkarten-Symbol (Lastschrift) -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v1h14V4a1 1 0 0 0-1-1H2zm13 4H1v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7z"/>
                             <path d="M2 10a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1z"/>
@@ -152,7 +247,14 @@
                         <small>Für: Mitgliedsbeiträge, Abos, wiederkehrende Zahlungen</small>
                         <div class="tooltip-icon" data-tooltip="Bei einer Lastschrift ziehen Sie Geld von den Konten Ihrer Kunden ein. Sie benötigen dafür ein Lastschriftmandat und eine Gläubiger-ID.">ⓘ</div>
                     </button>
+
+                    <!--
+                        Ueberweisungs-Button:
+                        - data-type="transfer" wird von JS ausgelesen
+                        - Wird aktiv bei Klick → JS wechselt Formularbereiche
+                    -->
                     <button id="transferBtn" class="payment-type-btn" data-type="transfer">
+                        <!-- SVG: Geldschein-Symbol (Ueberweisung) -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M1 3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1H1zm7 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>
                             <path d="M0 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V5zm3 0a2 2 0 0 1-2 2v4a2 2 0 0 1 2 2h10a2 2 0 0 1 2-2V7a2 2 0 0 1-2-2H3z"/>
@@ -165,16 +267,36 @@
                 </div>
             </div>
 
-            <!-- Step 2: Konfigurationsbereich -->
+            <!-- ============================================================
+                 SCHRITT 2: KONFIGURATIONSBEREICH
+                 ============================================================
+                 Enthaelt alle Einstellungen fuer die XML-Generierung:
+                 - SEPA-Format (pain-Version)
+                 - Allgemeine Einstellungen (Initiator, Ausfuehrungsdatum)
+                 - Lastschrift-spezifisch (Glaeubiger-Daten, Sequenztyp, Instrumentierung)
+                 - Ueberweisungs-spezifisch (Auftraggeber-Daten)
+                 - Konfigurationsverwaltung (Speichern/Laden als JSON)
+
+                 Die Sichtbarkeit der Lastschrift/Ueberweisungs-Sektionen
+                 wird per JavaScript gesteuert (display: none/block).
+                 ============================================================ -->
             <div class="step-section config-section">
                 <div class="step-header">
                     <span class="step-number">2</span>
                     <h2 id="configTitle">Ihre Daten eingeben</h2>
                 </div>
                 <p class="step-description">Geben Sie Ihre Bankdaten und weitere Einstellungen ein. Diese können Sie speichern und später wiederverwenden.</p>
-                
+
                 <div id="configForm" class="config-form">
-                    <!-- Format Selection -->
+
+                    <!-- ========== SEPA-Format-Auswahl ==========
+                         Dropdown mit allen unterstuetzten pain-Formaten.
+                         Die Optionen werden per JavaScript dynamisch
+                         gefiltert, je nach gewaehlter Zahlungsart:
+                         - Lastschrift: pain.008.001.02, pain.008.001.08
+                         - Ueberweisung: pain.001.001.03, .08, .09
+                         Die empfohlene Version hat ein ⭐ und "selected".
+                    -->
                     <div class="form-section">
                         <h3>
                             SEPA-Format
@@ -186,8 +308,10 @@
                                 <span class="help-text">Empfehlung: Die neueste Version</span>
                             </label>
                             <select id="painFormat" class="input-with-icon">
+                                <!-- Lastschrift-Formate (pain.008) -->
                                 <option value="pain.008.001.02">pain.008.001.02 (Ältere Version - hohe Kompatibilität)</option>
                                 <option value="pain.008.001.08" selected>pain.008.001.08 (Aktuelle Version - EMPFOHLEN) ⭐</option>
+                                <!-- Ueberweisungs-Formate (pain.001) -->
                                 <option value="pain.001.001.03">pain.001.001.03 (Ältere Version - hohe Kompatibilität)</option>
                                 <option value="pain.001.001.08">pain.001.001.08 (Neuere Version)</option>
                                 <option value="pain.001.001.09" selected>pain.001.001.09 (Neueste Version - EMPFOHLEN) ⭐</option>
@@ -199,8 +323,12 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Common Settings -->
+
+                    <!-- ========== Allgemeine Einstellungen ==========
+                         Diese Felder gelten fuer beide Zahlungsarten:
+                         - initiatorName: Erscheint als Ersteller im XML-Header (GrpHdr/InitgPty/Nm)
+                         - executionDate: Ausfuehrungsdatum (ColltnDt bzw. ReqdExctnDt im XML)
+                    -->
                     <div class="form-section">
                         <h3>
                             Allgemeine Einstellungen
@@ -217,7 +345,7 @@
                                     Dies ist der Name, der als Ersteller der SEPA-Datei erscheint.
                                 </div>
                             </div>
-                            
+
                             <div class="form-group">
                                 <label for="executionDate">
                                     Wann soll ausgeführt werden?
@@ -230,14 +358,28 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Direct Debit Settings -->
+
+                    <!-- ========== Lastschrift-Einstellungen (Glaeubiger) ==========
+                         Nur sichtbar wenn currentPaymentType === 'directDebit'.
+
+                         Felder und ihre XML-Entsprechungen:
+                         - creditorName  → PmtInf/Cdtr/Nm
+                         - creditorIBAN  → PmtInf/CdtrAcct/Id/IBAN
+                         - creditorBIC   → PmtInf/CdtrAgt/FinInstnId/BIC (optional seit 2016)
+                         - creditorId    → PmtInf/CdtrSchmeId/Id/PrvtId/Othr/Id
+                         - sequenceType  → PmtInf/DrctDbtTxInf/PmtTpInf/SeqTp
+                                           (FRST=Erstlastschrift, RCUR=Folgelastschrift,
+                                            OOFF=Einmalig, FNAL=Letzte)
+                         - localInstrumentation → PmtInf/PmtTpInf/LclInstrm/Cd
+                                                  (CORE=Basis, COR1=Schnell, B2B=Firmen)
+                    -->
                     <div id="directDebitSettings" class="form-section">
                         <h3>
                             Empfänger-Daten (Gläubiger)
                             <span class="tooltip-icon" data-tooltip="Das sind Ihre Daten - wohin das Geld fließt.">ⓘ</span>
                         </h3>
                         <div class="form-grid">
+                            <!-- Glaeubiger-Name: Pflichtfeld, wird per JS validiert -->
                             <div class="form-group">
                                 <label for="creditorName">
                                     Ihr Name/Firma *
@@ -245,7 +387,8 @@
                                 </label>
                                 <input type="text" id="creditorName" placeholder="z.B. Meine Firma GmbH" required class="input-with-validation" />
                             </div>
-                            
+
+                            <!-- Glaeubiger-IBAN: Wird per Mod-97 Checksumme validiert -->
                             <div class="form-group">
                                 <label for="creditorIBAN">
                                     Ihre IBAN *
@@ -254,7 +397,8 @@
                                 <input type="text" id="creditorIBAN" placeholder="DE89 3704 0044 0532 0130 00" required class="input-with-validation" maxlength="34" />
                                 <div class="validation-feedback"></div>
                             </div>
-                            
+
+                            <!-- Glaeubiger-BIC: Optional seit SEPA-Verordnung 2016 -->
                             <div class="form-group">
                                 <label for="creditorBIC">
                                     Ihre BIC
@@ -265,7 +409,8 @@
                                     <strong>Gut zu wissen:</strong> Seit 2016 ist der BIC innerhalb Europas nicht mehr erforderlich.
                                 </div>
                             </div>
-                            
+
+                            <!-- Glaeubiger-ID: Wird per Mod-97 Checksumme validiert (Bundesbank-Format) -->
                             <div class="form-group">
                                 <label for="creditorId">
                                     Ihre Gläubiger-ID *
@@ -277,7 +422,8 @@
                                     Kostenlos beantragen bei der <a href="https://extranet.bundesbank.de/scp/" target="_blank">Bundesbank</a>
                                 </div>
                             </div>
-                            
+
+                            <!-- Sequenztyp: Bestimmt den Typ der Lastschrift im Mandatszyklus -->
                             <div class="form-group">
                                 <label for="sequenceType">
                                     Welche Art von Lastschrift?
@@ -297,7 +443,8 @@
                                     • <strong>FNAL:</strong> Letzte Abbuchung vor Mandatsende
                                 </div>
                             </div>
-                            
+
+                            <!-- Lokale Instrumentierung: Bestimmt Verarbeitungsgeschwindigkeit und Zielgruppe -->
                             <div class="form-group">
                                 <label for="localInstrumentation">
                                     Lastschrift-Geschwindigkeit
@@ -317,30 +464,63 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Transfer Settings -->
+
+                    <!-- ========== Ueberweisungs-Einstellungen (Auftraggeber) ==========
+                         Nur sichtbar wenn currentPaymentType === 'transfer'.
+                         Initial per style="display: none;" versteckt.
+
+                         Felder und ihre XML-Entsprechungen:
+                         - debtorName → PmtInf/Dbtr/Nm
+                         - debtorIBAN → PmtInf/DbtrAcct/Id/IBAN
+                         - debtorBIC  → PmtInf/DbtrAgt/FinInstnId/BIC (optional)
+                    -->
                     <div id="transferSettings" class="form-section" style="display: none;">
-                        <h3>Überweisungs-Einstellungen</h3>
+                        <h3>
+                            Auftraggeber-Daten
+                            <span class="tooltip-icon" data-tooltip="Das sind Ihre Daten - von welchem Konto das Geld gesendet wird.">ⓘ</span>
+                        </h3>
                         <div class="form-grid">
                             <div class="form-group">
-                                <label for="debtorName">Auftraggeber Name *</label>
-                                <input type="text" id="debtorName" placeholder="z.B. Meine Firma GmbH" required />
+                                <label for="debtorName">
+                                    Ihr Name/Firma *
+                                    <span class="help-text">Auftraggeber der Überweisung</span>
+                                </label>
+                                <input type="text" id="debtorName" placeholder="z.B. Meine Firma GmbH" required class="input-with-validation" />
                             </div>
-                            
+
                             <div class="form-group">
-                                <label for="debtorIBAN">Auftraggeber IBAN *</label>
-                                <input type="text" id="debtorIBAN" placeholder="DE89370400440532013000" required />
+                                <label for="debtorIBAN">
+                                    Ihre IBAN *
+                                    <span class="help-text">Konto, von dem überwiesen wird</span>
+                                </label>
+                                <input type="text" id="debtorIBAN" placeholder="DE89 3704 0044 0532 0130 00" required class="input-with-validation" maxlength="34" />
+                                <div class="validation-feedback"></div>
                             </div>
-                            
+
                             <div class="form-group">
-                                <label for="debtorBIC">Auftraggeber BIC</label>
-                                <input type="text" id="debtorBIC" placeholder="COBADEFFXXX (optional)" />
-                                <small>Optional - wird automatisch ermittelt</small>
+                                <label for="debtorBIC">
+                                    Ihre BIC
+                                    <span class="help-text">Optional - nicht mehr zwingend nötig</span>
+                                </label>
+                                <input type="text" id="debtorBIC" placeholder="COBADEFFXXX" maxlength="11" />
+                                <div class="help-bubble">
+                                    <strong>Gut zu wissen:</strong> Seit 2016 ist der BIC innerhalb Europas nicht mehr erforderlich.
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Config Management Section -->
+
+                    <!-- ========== Konfigurationsverwaltung ==========
+                         Ermoeglicht das Speichern und Laden der Bankdaten als JSON-Datei.
+
+                         Funktionen (sepa-generator.js):
+                         - saveConfig: Sammelt alle Formularwerte → JSON → Blob → Download
+                         - loadConfig: Liest JSON-Datei → setzt alle Formularwerte
+                         - Auto-Save: Aenderungen werden automatisch in localStorage gespeichert
+
+                         Das versteckte <input type="file"> wird per JS beim Klick
+                         auf "Datei laden" ausgeloest (configFileInput.click()).
+                    -->
                     <div class="config-management">
                         <div class="config-info">
                             <div class="info-icon">💾</div>
@@ -354,9 +534,11 @@
                                 </ul>
                             </div>
                         </div>
-                        
+
                         <div class="button-group config-buttons">
+                            <!-- Speichern-Button: Laedt aktuelle Konfiguration als JSON herunter -->
                             <button id="saveConfig" class="btn btn-primary">
+                                <!-- SVG: Speichern/Download-Symbol -->
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H9.5a1 1 0 0 0-1 1v7.293l2.646-2.647a.5.5 0 0 1 .708.708l-3.5 3.5a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L7.5 9.293V2a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h2.5a.5.5 0 0 1 0 1H2z"/>
                                 </svg>
@@ -365,7 +547,9 @@
                                     <small>JSON-Datei herunterladen</small>
                                 </div>
                             </button>
+                            <!-- Laden-Button: Oeffnet Dateiauswahl fuer JSON-Import -->
                             <button id="loadConfig" class="btn btn-secondary">
+                                <!-- SVG: Upload-Symbol -->
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                                     <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
@@ -375,22 +559,35 @@
                                     <small>Gespeicherte Konfiguration</small>
                                 </div>
                             </button>
+                            <!-- Verstecktes File-Input fuer JSON-Import (per JS getriggert) -->
                             <input type="file" id="configFileInput" accept=".json" style="display: none;">
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Step 3: Transaktionen hinzufügen -->
+            <!-- ============================================================
+                 SCHRITT 3: ZAHLUNGEN HINZUFUEGEN
+                 ============================================================
+                 Zwei Eingabemethoden als Tab-Interface:
+                 1. Excel-Upload: Datei per Drag & Drop oder Klick hochladen
+                 2. Manuelle Eingabe: Einzelne Transaktionen per Formular
+
+                 Die Tab-Umschaltung erfolgt per JavaScript:
+                 - Klick auf Tab → .active-Klasse wechseln
+                 - Zugehoeriger .input-method-content wird ein-/ausgeblendet
+                 ============================================================ -->
             <div class="step-section">
                 <div class="step-header">
                     <span class="step-number">3</span>
                     <h2>Zahlungen hinzufügen</h2>
                 </div>
                 <p class="step-description">Wählen Sie, wie Sie Ihre Zahlungen eingeben möchten: per Excel-Datei oder manuell.</p>
-                
+
+                <!-- Tab-Buttons: Excel vs. Manuell -->
                 <div class="input-method-tabs">
                     <button id="excelTab" class="input-tab active" data-method="excel">
+                        <!-- SVG: Dokument-Symbol -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/>
                             <path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
@@ -398,19 +595,28 @@
                         Excel-Datei hochladen
                     </button>
                     <button id="manualTab" class="input-tab" data-method="manual">
+                        <!-- SVG: Stift-Symbol -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
                         </svg>
                         Manuell eingeben
                     </button>
                 </div>
-                
-                <!-- Excel Upload Method -->
+
+                <!-- ========== Excel-Upload Methode ==========
+                     Sichtbar wenn Excel-Tab aktiv (.active-Klasse).
+
+                     Ablauf:
+                     1. Vorlage herunterladen (downloadTemplate-Button)
+                     2. Excel-Datei auswaehlen/droppen (excelFile-Input)
+                     3. JS parst die Datei mit SheetJS (XLSX)
+                     4. Transaktionen werden validiert und zur Vorschau hinzugefuegt
+                -->
                 <div id="excelInputMethod" class="input-method-content active">
-                    <!-- Excel Instructions -->
+                    <!-- Anleitung: 3-Schritte-Anleitung fuer den Excel-Upload -->
                     <div class="excel-instructions">
                         <div class="instruction-header">
-                            <span class="instruction-icon">�</span>
+                            <span class="instruction-icon">📋</span>
                             <h3>Excel-Upload in 3 einfachen Schritten</h3>
                         </div>
                         <div class="instruction-steps">
@@ -437,10 +643,12 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="upload-section">
+                        <!-- Template-Download: Generiert eine Excel-Vorlage mit Beispieldaten via JS -->
                         <div class="template-download">
                             <button id="downloadTemplate" class="btn btn-template">
+                                <!-- SVG: Dokument-Symbol -->
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/>
                                     <path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
@@ -451,10 +659,14 @@
                                 </div>
                             </button>
                         </div>
-                        
+
+                        <!-- Datei-Upload: Das <input type="file"> ist versteckt,
+                             das <label> dient als gestylter Drag-&-Drop-Bereich.
+                             JS behandelt sowohl Klick als auch Drag-&-Drop Events. -->
                         <div class="file-input-wrapper">
                             <input type="file" id="excelFile" accept=".xlsx,.xls" />
                             <label for="excelFile" class="file-label">
+                                <!-- SVG: Upload-Symbol -->
                                 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                                     <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
@@ -463,11 +675,23 @@
                                 <small>oder klicken zum Auswählen</small>
                             </label>
                         </div>
+                        <!-- Dateiname-Anzeige: Wird per JS befuellt nach erfolgreichem Upload -->
                         <div id="fileName" class="file-name"></div>
                     </div>
                 </div>
-                
-                <!-- Manual Input Method -->
+
+                <!-- ========== Manuelle Eingabe-Methode ==========
+                     Sichtbar wenn Manuell-Tab aktiv (.active-Klasse).
+
+                     Formular fuer einzelne Transaktionen. Bei Klick auf
+                     "Zahlung zur Liste hinzufuegen" wird die Transaktion
+                     validiert und zur Vorschautabelle hinzugefuegt.
+
+                     Das Label und Pflichtfeld fuer manualReference aendert sich
+                     je nach Zahlungsart:
+                     - Lastschrift: "Mandatsreferenz *" (Pflicht)
+                     - Ueberweisung: "Referenz" (Optional)
+                -->
                 <div id="manualInputMethod" class="input-method-content">
                     <div class="manual-entry-form">
                         <h3>Neue Zahlung hinzufügen</h3>
@@ -476,34 +700,38 @@
                                 <label for="manualName">Name *</label>
                                 <input type="text" id="manualName" placeholder="Max Mustermann" required />
                             </div>
-                            
+
                             <div class="form-group">
                                 <label for="manualIBAN">IBAN *</label>
                                 <input type="text" id="manualIBAN" placeholder="DE89 3704 0044 0532 0130 00" required maxlength="34" />
                             </div>
-                            
+
                             <div class="form-group">
                                 <label for="manualBIC">BIC</label>
                                 <input type="text" id="manualBIC" placeholder="COBADEFFXXX (optional)" maxlength="11" />
                             </div>
-                            
+
                             <div class="form-group">
                                 <label for="manualAmount">Betrag (€) *</label>
                                 <input type="number" id="manualAmount" placeholder="45.00" step="0.01" min="0.01" max="999999999.99" required />
                             </div>
-                            
+
+                            <!-- Verwendungszweck: Max. 140 Zeichen (SEPA-Standard) -->
                             <div class="form-group full-width">
                                 <label for="manualRemittance">Verwendungszweck *</label>
                                 <input type="text" id="manualRemittance" placeholder="z.B. Mitgliedsbeitrag Januar 2025" required maxlength="140" />
                             </div>
-                            
+
+                            <!-- Referenz/Mandatsreferenz: Label wird per JS dynamisch geaendert -->
                             <div class="form-group">
                                 <label for="manualReference" id="manualReferenceLabel">Mandatsreferenz *</label>
                                 <input type="text" id="manualReference" placeholder="MAND-001-2025" required maxlength="35" />
                             </div>
                         </div>
-                        
+
+                        <!-- Button: Fuegt die eingegebene Transaktion zur Vorschauliste hinzu -->
                         <button id="addManualEntry" class="btn btn-primary">
+                            <!-- SVG: Plus-Symbol -->
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
                             </svg>
@@ -513,8 +741,25 @@
                 </div>
             </div>
 
+            <!-- ============================================================
+                 VORSCHAU-BEREICH
+                 ============================================================
+                 Wird per JavaScript eingeblendet (style.display = 'block'),
+                 sobald mindestens eine Transaktion vorhanden ist.
+
+                 Enthaelt:
+                 - Zusammenfassung (Anzahl Transaktionen, Gesamtbetrag)
+                 - Vorschautabelle mit allen Transaktionen
+                 - "XML generieren" Button → startet die XML-Erzeugung
+                 - "Zuruecksetzen" Button → leert alle Transaktionen
+
+                 Die Tabellenspalte "Mandatsreferenz" wird per JS
+                 dynamisch umbenannt zu "Referenz" bei Ueberweisungen.
+                 Jede Tabellenzeile hat einen Loeschen-Button.
+                 ============================================================ -->
             <div id="previewSection" class="preview-section" style="display: none;">
                 <h2>Vorschau der Einzüge</h2>
+                <!-- Zusammenfassung: "X Transaktionen | Gesamtbetrag: X.XX EUR" -->
                 <div id="summary" class="summary"></div>
                 <div class="table-wrapper">
                     <table id="previewTable">
@@ -525,28 +770,43 @@
                                 <th>IBAN</th>
                                 <th>Betrag</th>
                                 <th>Verwendungszweck</th>
+                                <!-- Spaltenname wird per JS geaendert: "Mandatsreferenz" oder "Referenz" -->
                                 <th id="mandateColumn">Mandatsreferenz</th>
                                 <th>Aktion</th>
                             </tr>
                         </thead>
+                        <!-- Tabellenkoerper: Wird per JS dynamisch befuellt -->
                         <tbody id="previewBody">
                         </tbody>
                     </table>
                 </div>
                 <div class="button-group">
+                    <!-- Hauptaktion: XML-Datei generieren und als Download anbieten -->
                     <button id="generateBtn" class="btn btn-primary">
+                        <!-- SVG: Download-Symbol -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                             <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
                         </svg>
                         SEPA-XML generieren und herunterladen
                     </button>
+                    <!-- Zuruecksetzen: Leert die Transaktionsliste und versteckt die Vorschau -->
                     <button id="resetBtn" class="btn btn-secondary">Zurücksetzen</button>
                 </div>
             </div>
 
+            <!-- ============================================================
+                 FEHLERBEREICH
+                 ============================================================
+                 Wird per JavaScript eingeblendet wenn bei der XML-Generierung
+                 oder beim Excel-Import ein Fehler auftritt.
+
+                 Zeigt eine rote Fehlermeldung mit Shake-Animation.
+                 Die Fehlermeldung wird per JS in #errorMessage geschrieben.
+                 ============================================================ -->
             <div id="errorSection" class="error-section" style="display: none;">
                 <div class="error-message">
+                    <!-- SVG: Ausrufezeichen im Kreis -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
                         <path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/>
@@ -555,8 +815,18 @@
                 </div>
             </div>
 
+            <!-- ============================================================
+                 HINWEISE ZUR EXCEL-DATEI
+                 ============================================================
+                 Informationsbereich mit den erwarteten Spaltenformaten
+                 fuer Lastschrift und Ueberweisung.
+
+                 Die Sichtbarkeit von #directDebitInfo und #transferInfo
+                 wird per JS gesteuert (display: none/block).
+                 ============================================================ -->
             <div class="info-section">
                 <h3>Hinweise zur Excel-Datei</h3>
+                <!-- Lastschrift-Info: Erwartete Spalten fuer pain.008 -->
                 <div id="directDebitInfo">
                     <h4>Für SEPA-Lastschrift:</h4>
                     <ul>
@@ -565,6 +835,7 @@
                         <li>Doppelte Mandatsreferenzen werden automatisch gefiltert</li>
                     </ul>
                 </div>
+                <!-- Ueberweisungs-Info: Erwartete Spalten fuer pain.001 -->
                 <div id="transferInfo" style="display: none;">
                     <h4>Für SEPA-Überweisung:</h4>
                     <ul>
@@ -581,12 +852,25 @@
                     <li>Beträge mit maximal 2 Dezimalstellen</li>
                 </ul>
             </div>
-            
-            <!-- FAQ Section -->
+
+            <!-- ============================================================
+                 FAQ-BEREICH (Haeufig gestellte Fragen)
+                 ============================================================
+                 Akkordeon-Interface: Klick auf eine Frage zeigt/versteckt
+                 die Antwort. Die Toggle-Logik ist in sepa-generator.js
+                 implementiert (faqToggle Event-Listener).
+
+                 Funktionsweise:
+                 - Klick auf .faq-question → togglet .active-Klasse auf .faq-item
+                 - CSS-Transition: max-height 0 → 1000px fuer sanfte Animation
+                 - Plus-Symbol rotiert zu X bei .active (transform: rotate(45deg))
+                 ============================================================ -->
             <div class="faq-section">
                 <h2>Häufig gestellte Fragen</h2>
-                
+
                 <div class="faq-container">
+
+                    <!-- FAQ 1: Unterschied Lastschrift vs. Ueberweisung -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Was ist der Unterschied zwischen SEPA-Lastschrift und SEPA-Überweisung?</h4>
@@ -594,13 +878,13 @@
                         </div>
                         <div class="faq-answer">
                             <div class="faq-answer-content">
-                            <div class="faq-answer-content">
                                 <p><strong>SEPA-Lastschrift:</strong> Sie ziehen Geld von Kundenkonten ein. Benötigt Mandate und Gläubiger-ID. Ideal für wiederkehrende Zahlungen wie Mitgliedsbeiträge.</p>
                                 <p><strong>SEPA-Überweisung:</strong> Sie überweisen Geld an Empfänger. Keine Mandate erforderlich. Ideal für Gehaltszahlungen oder Lieferantenrechnungen.</p>
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 2: Pain-Format-Empfehlung -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Welches Pain-Format soll ich verwenden?</h4>
@@ -617,7 +901,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 3: Glaeubiger-ID beantragen -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Wo bekomme ich eine Gläubiger-Identifikationsnummer?</h4>
@@ -634,7 +919,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 4: Sequenztypen erklaert -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Was bedeuten die Sequenztypen (FRST, RCUR, OOFF, FNAL)?</h4>
@@ -652,7 +938,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 5: Instrumentierungen (CORE/COR1/B2B) -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Was ist der Unterschied zwischen CORE, COR1 und B2B?</h4>
@@ -668,7 +955,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 6: BIC-Pflicht -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Ist der BIC (Bank Identifier Code) noch erforderlich?</h4>
@@ -681,7 +969,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 7: Sicherheit und Datenschutz -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Wie sicher ist diese Anwendung?</h4>
@@ -700,7 +989,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 8: Banking-Kompatibilitaet -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Kann ich die XML-Datei direkt in mein Online-Banking hochladen?</h4>
@@ -720,7 +1010,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 9: Fehlerbehandlung bei Excel-Import -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Was passiert, wenn meine Excel-Datei Fehler enthält?</h4>
@@ -739,7 +1030,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 10: Mehrere Zahlungen mit unterschiedlichen Einstellungen -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Kann ich mehrere Zahlungen mit unterschiedlichen Daten erstellen?</h4>
@@ -757,7 +1049,8 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <!-- FAQ 11: Mandatsaenderungen -->
                     <div class="faq-item">
                         <div class="faq-question">
                             <h4>Unterstützt die App auch Mandate mit Änderungen?</h4>
@@ -765,36 +1058,54 @@
                         </div>
                         <div class="faq-answer">
                             <div class="faq-answer-content">
-                            <p>Ja! Bei Mandatsänderungen (z.B. Wechsel der Gläubiger-ID) können Sie pro Transaktion Änderungsinformationen angeben. Dies ist besonders relevant bei:</p>
-                            <ul>
-                                <li>Fusion von Unternehmen</li>
-                                <li>Änderung der Gläubiger-Identifikationsnummer</li>
-                                <li>Kontowechsel des Gläubigers</li>
-                            </ul>
-                            <p>Für diesen erweiterten Use-Case kontaktieren Sie bitte den Support.</p>
+                                <p>Ja! Bei Mandatsänderungen (z.B. Wechsel der Gläubiger-ID) können Sie pro Transaktion Änderungsinformationen angeben. Dies ist besonders relevant bei:</p>
+                                <ul>
+                                    <li>Fusion von Unternehmen</li>
+                                    <li>Änderung der Gläubiger-Identifikationsnummer</li>
+                                    <li>Kontowechsel des Gläubigers</li>
+                                </ul>
+                                <p>Für diesen erweiterten Use-Case kontaktieren Sie bitte den Support.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </main>
 
-        <!-- Privacy & Security Section -->
+        <!-- ============================================================
+             DATENSCHUTZ-BEREICH
+             ============================================================
+             Gruener Abschnitt mit detaillierten Datenschutz-Informationen.
+
+             Enthaelt 4 Feature-Karten:
+             1. Keine Server-Uebertragung
+             2. DSGVO-konform
+             3. Open Source (mit GitHub-Link)
+             4. Keine Cookies
+
+             Plus ein "Versprechen"-Block am Ende.
+             Glasmorphismus-Design (backdrop-filter: blur).
+             ============================================================ -->
         <div class="privacy-section">
             <div class="privacy-content">
                 <div class="privacy-icon">🔒</div>
                 <h2>100% Datenschutz garantiert</h2>
                 <p class="privacy-lead">Ihre Bankdaten sind sicher – versprochen!</p>
-                
+
                 <div class="privacy-features">
+                    <!-- Datenschutz-Feature 1: Keine Server-Uebertragung -->
                     <div class="privacy-item">
+                        <!-- SVG: Schloss-Symbol -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
                         </svg>
                         <h3>Keine Server-Übertragung</h3>
                         <p>Alle Ihre Daten werden ausschließlich in Ihrem Browser verarbeitet. Es findet <strong>keine Übertragung</strong> zu unserem oder einem anderen Server statt.</p>
                     </div>
-                    
+
+                    <!-- Datenschutz-Feature 2: DSGVO-Konformitaet -->
                     <div class="privacy-item">
+                        <!-- SVG: Haekchen im Quadrat -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
                             <path d="M10.854 5.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 7.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
@@ -802,25 +1113,31 @@
                         <h3>DSGVO-konform</h3>
                         <p>Diese Anwendung erfüllt alle Anforderungen der <strong>Datenschutz-Grundverordnung (DSGVO)</strong>. Es werden keine personenbezogenen Daten gespeichert oder verarbeitet.</p>
                     </div>
-                    
+
+                    <!-- Datenschutz-Feature 3: Open Source mit GitHub-Link -->
                     <div class="privacy-item">
+                        <!-- SVG: Fragezeichen im Kreis -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
                             <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
                         </svg>
                         <h3>Open Source</h3>
-                        <p>Der gesamte Quellcode ist einsehbar. Sie können selbst überprüfen, dass keine Daten das Gerät verlassen. <strong>Volle Transparenz</strong> garantiert.</p>
+                        <p>Der gesamte Quellcode ist <a href="https://github.com/mriege/sepa-xml-generator" target="_blank" rel="noopener" style="color: white; text-decoration: underline;">auf GitHub einsehbar</a>. Sie können selbst überprüfen, dass keine Daten das Gerät verlassen. <strong>Volle Transparenz</strong> garantiert.</p>
                     </div>
-                    
+
+                    <!-- Datenschutz-Feature 4: Keine Cookies -->
                     <div class="privacy-item">
+                        <!-- SVG: Schild-Symbol (kein Tracking) -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-7 1a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                            <path d="M5.338 1.59a61.44 61.44 0 0 0-2.837.856.481.481 0 0 0-.328.39c-.554 4.157.726 7.19 2.253 9.188a10.725 10.725 0 0 0 2.287 2.233c.346.244.652.42.893.533.12.057.218.095.293.118a.55.55 0 0 0 .101.025.615.615 0 0 0 .1-.025c.076-.023.174-.061.294-.118.24-.113.547-.29.893-.533a10.726 10.726 0 0 0 2.287-2.233c1.527-1.997 2.807-5.031 2.253-9.188a.48.48 0 0 0-.328-.39c-.651-.213-1.75-.56-2.837-.855C9.552 1.29 8.531 1.067 8 1.067c-.53 0-1.552.223-2.662.524zM5.072.56C6.157.265 7.31 0 8 0s1.843.265 2.928.56c1.11.3 2.229.655 2.887.87a1.54 1.54 0 0 1 1.044 1.262c.596 4.477-.787 7.795-2.465 9.99a11.775 11.775 0 0 1-2.517 2.453 7.159 7.159 0 0 1-1.048.625c-.28.132-.581.24-.829.24s-.548-.108-.829-.24a7.158 7.158 0 0 1-1.048-.625 11.777 11.777 0 0 1-2.517-2.453C1.928 10.487.545 7.169 1.141 2.692A1.54 1.54 0 0 1 2.185 1.43 62.456 62.456 0 0 1 5.072.56z"/>
+                            <path d="M10.854 5.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 7.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
                         </svg>
                         <h3>Keine Cookies</h3>
                         <p>Wir verwenden <strong>keine Cookies</strong> und kein Tracking. Nur Ihre Einstellungen werden lokal in Ihrem Browser gespeichert (LocalStorage).</p>
                     </div>
                 </div>
-                
+
+                <!-- Datenschutz-Versprechen: Hervorgehobener Text-Block -->
                 <div class="privacy-guarantee">
                     <h3>💚 Unser Versprechen an Sie</h3>
                     <p>Wir nehmen Datenschutz ernst. Diese Anwendung wurde speziell entwickelt, um Ihre sensiblen Bankdaten zu schützen. Alle Berechnungen und die XML-Generierung erfolgen direkt in Ihrem Browser – <strong>ohne Umwege über Server</strong>. Sie haben die volle Kontrolle über Ihre Daten.</p>
@@ -829,13 +1146,26 @@
         </div>
     </div>
 
+    <!-- ============================================================
+         FOOTER
+         ============================================================
+         Dunkler Footer mit vier Spalten:
+         1. Produktname und Beschreibung
+         2. Rechtliche Hinweise (DSGVO, Open Source)
+         3. Unterstuetzte SEPA-Formate
+         4. Entwickler-Info mit Link
+
+         Darunter: Copyright, Impressum, Datenschutz, GitHub-Link
+         ============================================================ -->
     <footer>
             <div class="footer-content">
+                <!-- Spalte 1: Produktname -->
                 <div class="footer-section">
                     <h3>SEPA-XML Generator</h3>
                     <p>Kostenlos, sicher und einfach zu bedienen</p>
                 </div>
-                
+
+                <!-- Spalte 2: Rechtliches -->
                 <div class="footer-section">
                     <h4>Rechtliches</h4>
                     <ul>
@@ -844,7 +1174,8 @@
                         <li>✓ Open Source</li>
                     </ul>
                 </div>
-                
+
+                <!-- Spalte 3: Unterstuetzte Formate -->
                 <div class="footer-section">
                     <h4>Unterstützte Formate</h4>
                     <ul>
@@ -852,7 +1183,8 @@
                         <li>pain.001.001.03 / .08 / .09 (Überweisung)</li>
                     </ul>
                 </div>
-                
+
+                <!-- Spalte 4: Entwickler -->
                 <div class="footer-section">
                     <h4>Entwickelt von</h4>
                     <a href="https://webexperte.berlin" target="_blank" rel="noopener" class="footer-link">
@@ -861,17 +1193,20 @@
                     <p class="footer-tagline">Ihr Experte für sichere Webanwendungen</p>
                 </div>
             </div>
-            
+
+            <!-- Footer-Bottom: Copyright und rechtliche Links -->
             <div class="footer-bottom">
                 <p>&copy; 2025 Webexperte.Berlin | Alle Rechte vorbehalten</p>
                 <p class="footer-links">
-                    <a href="https://www.webexperte.berlin/impressum.html" target="_blank" rel="noopener">Impressum</a> | 
-                    <a href="https://www.webexperte.berlin/datenschutz.html" target="_blank" rel="noopener">Datenschutz</a>
+                    <a href="https://www.webexperte.berlin/impressum.html" target="_blank" rel="noopener">Impressum</a> |
+                    <a href="https://www.webexperte.berlin/datenschutz.html" target="_blank" rel="noopener">Datenschutz</a> |
+                    <a href="https://github.com/mriege/sepa-xml-generator" target="_blank" rel="noopener">GitHub</a>
                 </p>
                 <p class="footer-privacy">🔒 Ihre Daten bleiben sicher in Ihrem Browser</p>
             </div>
         </footer>
 
+    <!-- Anwendungslogik: Event-Handling, Validierung, XML-Generierung -->
     <script src="sepa-generator.js"></script>
 </body>
 </html>
