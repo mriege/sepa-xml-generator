@@ -724,3 +724,468 @@ describe('Integration: Simulation des Generator-Flows', () => {
     assert.ok(xml.includes('120.00'));
   });
 });
+
+// =========================================================================
+// EXCEL-IMPORT & -VERARBEITUNG
+// =========================================================================
+// Simuliert den Datenfluss: Excel-Zeilen → Mapping (wie in sepa-generator.js
+// handleFileSelect, Zeilen 864-883) → SEPA-Library → XML-Validierung.
+//
+// Da sepa-generator.js Browser-Code mit DOM-Abhaengigkeiten ist, wird die
+// Mapping-Logik hier 1:1 nachgebaut und getestet.
+// =========================================================================
+
+// ---------------------------------------------------------------------------
+// Excel-Hilfs­funktionen
+// ---------------------------------------------------------------------------
+
+/**
+ * Simuliert die Spalten-Mapping-Logik aus sepa-generator.js handleFileSelect().
+ * Wandelt Excel-Zeilen (wie von XLSX.utils.sheet_to_json) in Transaktions-Objekte um.
+ *
+ * @param {Object[]} rows - Array von Zeilen-Objekten mit Spaltennamen als Keys
+ * @param {string} paymentType - 'directDebit' oder 'transfer'
+ * @returns {Object[]} Array von Transaktions-Objekten
+ */
+function processExcelRows(rows, paymentType) {
+  return rows.map(row => {
+    const t = {
+      name: row.Name || row.name || '',
+      iban: (row.IBAN || row.iban || '').toString().replace(/\s/g, ''),
+      bic: (row.BIC || row.bic || '').toString(),
+      amount: parseFloat(row.Betrag || row.betrag || row.Amount || row.amount || 0),
+      remittanceInfo: row.Verwendungszweck || row.verwendungszweck || row.Purpose || row.purpose || '',
+    };
+    if (paymentType === 'directDebit') {
+      t.mandateId = row.Mandatsreferenz || row.mandatsreferenz || row.MandateId || row.mandateId || '';
+      t.mandateSignatureDate = row.Mandatsdatum || row.mandatsdatum || row.MandateDate || row.mandateDate || '';
+    } else {
+      t.mandateId = row.Referenz || row.referenz || row.Reference || row.reference || '';
+    }
+    return t;
+  });
+}
+
+/**
+ * Vollstaendige Pipeline: Excel-Zeilen → SEPA XML-String.
+ * Simuliert generateAndDownload() aus sepa-generator.js (Zeilen 991-1065).
+ *
+ * @param {Object[]} rows - Excel-Zeilen (wie von sheet_to_json)
+ * @param {string} paymentType - 'directDebit' oder 'transfer'
+ * @param {string} painFormat - Pain-Format-String
+ * @returns {string} Generierter XML-String
+ */
+function excelToXML(rows, paymentType, painFormat) {
+  const transactions = processExcelRows(rows, paymentType);
+
+  const doc = new SEPA.Document(painFormat);
+  doc.grpHdr.id = 'MSG-EXCEL-TEST';
+  doc.grpHdr.created = new Date('2026-01-15T10:00:00Z');
+  doc.grpHdr.initiatorName = 'Excel Test Initiator';
+
+  const info = doc.createPaymentInfo();
+
+  if (paymentType === 'directDebit') {
+    info.collectionDate = new Date('2026-02-01');
+    info.creditorName = TEST_DATA.creditor.name;
+    info.creditorIBAN = TEST_DATA.creditor.iban;
+    info.creditorBIC = TEST_DATA.creditor.bic;
+    info.creditorId = TEST_DATA.creditor.id;
+    info.sequenceType = 'RCUR';
+    info.localInstrumentation = 'CORE';
+
+    for (const t of transactions) {
+      const txn = info.createTransaction();
+      txn.debtorName = t.name;
+      txn.debtorIBAN = t.iban;
+      txn.debtorBIC = t.bic || '';
+      txn.amount = parseFloat(t.amount);
+      txn.mandateId = t.mandateId;
+      const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
+      txn.mandateSignatureDate = isNaN(d.getTime()) ? new Date() : d;
+      txn.remittanceInfo = t.remittanceInfo;
+      info.addTransaction(txn);
+    }
+  } else {
+    info.requestedExecutionDate = new Date('2026-02-01');
+    info.debtorName = TEST_DATA.debtor.name;
+    info.debtorIBAN = TEST_DATA.debtor.iban;
+    info.debtorBIC = TEST_DATA.debtor.bic;
+
+    for (const t of transactions) {
+      const txn = info.createTransaction();
+      txn.creditorName = t.name;
+      txn.creditorIBAN = t.iban;
+      txn.creditorBIC = t.bic || '';
+      txn.amount = parseFloat(t.amount);
+      txn.remittanceInfo = t.remittanceInfo;
+      txn.end2endId = t.mandateId || 'NOTPROVIDED';
+      info.addTransaction(txn);
+    }
+  }
+
+  doc.addPaymentInfo(info);
+  return doc.toString();
+}
+
+// Beispiel-Zeilen wie sie die Excel-Vorlage (Template) liefern wuerde
+const TEMPLATE_ROWS_DD = [
+  { Name: 'Max Mustermann',  IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX', Betrag: 45.00, Verwendungszweck: 'Mitgliedsbeitrag Januar 2025', Mandatsreferenz: 'MAND-001-2025', Mandatsdatum: '2025-01-01' },
+  { Name: 'Erika Musterfrau', IBAN: 'DE75512108001245126199', BIC: '',            Betrag: 30.00, Verwendungszweck: 'Mitgliedsbeitrag Januar 2025', Mandatsreferenz: 'MAND-002-2025', Mandatsdatum: '2025-01-01' },
+];
+
+const TEMPLATE_ROWS_CT = [
+  { Name: 'Max Mustermann',  IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX', Betrag: 1500.00, Verwendungszweck: 'Gehalt Januar 2025', Referenz: 'REF-001' },
+  { Name: 'Erika Musterfrau', IBAN: 'DE75512108001245126199', BIC: '',            Betrag: 2000.00, Verwendungszweck: 'Gehalt Januar 2025', Referenz: 'REF-002' },
+];
+
+// -------------------------------------------------------------------------
+// 10. Excel-Import: Spalten-Mapping
+// -------------------------------------------------------------------------
+
+describe('Excel-Import: Spalten-Mapping', () => {
+
+  it('erkennt deutsche Spalten bei Lastschrift', () => {
+    const rows = [{
+      Name: 'Anna Schmidt', IBAN: 'DE75512108001245126199', BIC: 'SOLADEST600',
+      Betrag: 49.99, Verwendungszweck: 'Beitrag', Mandatsreferenz: 'MAND-001', Mandatsdatum: '2025-06-15',
+    }];
+    const result = processExcelRows(rows, 'directDebit');
+    assert.strictEqual(result[0].name, 'Anna Schmidt');
+    assert.strictEqual(result[0].iban, 'DE75512108001245126199');
+    assert.strictEqual(result[0].bic, 'SOLADEST600');
+    assert.strictEqual(result[0].amount, 49.99);
+    assert.strictEqual(result[0].remittanceInfo, 'Beitrag');
+    assert.strictEqual(result[0].mandateId, 'MAND-001');
+    assert.strictEqual(result[0].mandateSignatureDate, '2025-06-15');
+  });
+
+  it('erkennt deutsche Spalten bei Überweisung', () => {
+    const rows = [{
+      Name: 'Bernd Weber', IBAN: 'DE27100777770209299700', BIC: 'DEUTDEFF',
+      Betrag: 1500, Verwendungszweck: 'Gehalt', Referenz: 'REF-2026-001',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].name, 'Bernd Weber');
+    assert.strictEqual(result[0].iban, 'DE27100777770209299700');
+    assert.strictEqual(result[0].amount, 1500);
+    assert.strictEqual(result[0].mandateId, 'REF-2026-001');
+  });
+
+  it('erkennt englische Spalten', () => {
+    const rows = [{
+      name: 'John Doe', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX',
+      Amount: 100, Purpose: 'Invoice', MandateId: 'M-001', MandateDate: '2025-03-01',
+    }];
+    const result = processExcelRows(rows, 'directDebit');
+    assert.strictEqual(result[0].name, 'John Doe');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+    assert.strictEqual(result[0].amount, 100);
+    assert.strictEqual(result[0].remittanceInfo, 'Invoice');
+    assert.strictEqual(result[0].mandateId, 'M-001');
+    assert.strictEqual(result[0].mandateSignatureDate, '2025-03-01');
+  });
+
+  it('erkennt kleingeschriebene Spalten', () => {
+    const rows = [{
+      name: 'Test Person', iban: 'DE89370400440532013000', bic: '',
+      betrag: 25.50, verwendungszweck: 'Test Zweck',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].name, 'Test Person');
+    assert.strictEqual(result[0].amount, 25.50);
+    assert.strictEqual(result[0].remittanceInfo, 'Test Zweck');
+  });
+
+  it('erkennt gemischte Spaltensprachen', () => {
+    const rows = [{
+      Name: 'Mixed Person', iban: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Amount: 75, Verwendungszweck: 'Gemischt',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].name, 'Mixed Person');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+    assert.strictEqual(result[0].bic, 'COBADEFFXXX');
+    assert.strictEqual(result[0].amount, 75);
+    assert.strictEqual(result[0].remittanceInfo, 'Gemischt');
+  });
+
+  it('Überweisung liest Referenz-Spalte statt Mandatsreferenz', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89370400440532013000', BIC: '',
+      Betrag: 100, Verwendungszweck: 'Test', Referenz: 'MY-REF', Mandatsreferenz: 'SHOULD-IGNORE',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    // Bei Überweisung soll Referenz gelesen werden, nicht Mandatsreferenz
+    assert.strictEqual(result[0].mandateId, 'MY-REF');
+  });
+
+  it('Lastschrift liest Mandatsreferenz-Spalte statt Referenz', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89370400440532013000', BIC: '',
+      Betrag: 100, Verwendungszweck: 'Test', Mandatsreferenz: 'MAND-123', Mandatsdatum: '2025-01-01',
+      Referenz: 'SHOULD-IGNORE',
+    }];
+    const result = processExcelRows(rows, 'directDebit');
+    assert.strictEqual(result[0].mandateId, 'MAND-123');
+  });
+});
+
+// -------------------------------------------------------------------------
+// 11. Excel-Import: Datenverarbeitung
+// -------------------------------------------------------------------------
+
+describe('Excel-Import: Datenverarbeitung', () => {
+
+  it('entfernt Whitespace aus IBAN', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89 3704 0044 0532 0130 00', BIC: '', Betrag: 10, Verwendungszweck: 'Test',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+  });
+
+  it('leerer BIC wird als NOTPROVIDED im XML', () => {
+    const rows = [{
+      Name: 'Clara Fischer', IBAN: 'DE02120300000000202051', BIC: '', Betrag: 50, Verwendungszweck: 'Test',
+      Referenz: 'REF-001',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assert.ok(xml.includes('NOTPROVIDED'), 'Leerer BIC sollte als NOTPROVIDED erscheinen');
+  });
+
+  it('Betrag als String wird korrekt geparsed', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: '45.00', Verwendungszweck: 'Test', Referenz: 'REF',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].amount, 45.00);
+    assert.strictEqual(typeof result[0].amount, 'number');
+  });
+
+  it('fehlender Betrag wird zu 0 (NaN-sicher)', () => {
+    const rows = [{ Name: 'Test', IBAN: 'DE89370400440532013000', BIC: '' }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].amount, 0);
+  });
+
+  it('fehlende optionale Felder werden als leere Strings gesetzt', () => {
+    const rows = [{ Name: 'Nur Name', IBAN: 'DE89370400440532013000', Betrag: 10 }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].bic, '');  // (undefined || '') → ''
+    assert.strictEqual(result[0].remittanceInfo, '');
+    assert.strictEqual(result[0].mandateId, '');
+  });
+
+  it('verarbeitet mehrere Zeilen korrekt', () => {
+    const rows = [
+      { Name: 'Person A', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX', Betrag: 100, Verwendungszweck: 'A' },
+      { Name: 'Person B', IBAN: 'DE75512108001245126199', BIC: 'SOLADEST600', Betrag: 200, Verwendungszweck: 'B' },
+      { Name: 'Person C', IBAN: 'DE27100777770209299700', BIC: 'DEUTDEFF',    Betrag: 300, Verwendungszweck: 'C' },
+    ];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result.length, 3);
+    assert.strictEqual(result[0].name, 'Person A');
+    assert.strictEqual(result[1].name, 'Person B');
+    assert.strictEqual(result[2].name, 'Person C');
+    assert.strictEqual(result[0].amount + result[1].amount + result[2].amount, 600);
+  });
+
+  it('IBAN als Zahl wird korrekt zu String konvertiert', () => {
+    // Excel kann IBANs als Zahlen interpretieren
+    const rows = [{
+      Name: 'Test', IBAN: 1234567890, BIC: '', Betrag: 10, Verwendungszweck: 'Test',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(typeof result[0].iban, 'string');
+    assert.strictEqual(result[0].iban, '1234567890');
+  });
+});
+
+// -------------------------------------------------------------------------
+// 12. Excel-Import: End-to-End Pipeline
+// -------------------------------------------------------------------------
+
+describe('Excel-Import: End-to-End Pipeline', () => {
+
+  it('Lastschrift-Vorlage erzeugt valides XML', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.08');
+    assertValidXML(xml, 'pain.008.001.08');
+    assert.ok(xml.includes('<CstmrDrctDbtInitn>'), 'Fehlendes Root-Element');
+    assert.ok(xml.includes('<PmtMtd>DD</PmtMtd>'), 'Falsche Zahlungsmethode');
+    assert.ok(xml.includes('<NbOfTxs>2</NbOfTxs>'), 'Falsche Transaktionsanzahl');
+    assert.ok(xml.includes('<CtrlSum>75.00</CtrlSum>'), 'Falsche Kontrollsumme (45+30)');
+    assert.ok(xml.includes('Max Mustermann'), 'Fehlender Schuldner');
+    assert.ok(xml.includes('Erika Musterfrau'), 'Fehlender Schuldner');
+    assert.ok(xml.includes('MAND-001-2025'), 'Fehlende Mandatsreferenz');
+    assert.ok(xml.includes('MAND-002-2025'), 'Fehlende Mandatsreferenz');
+  });
+
+  it('Überweisungs-Vorlage erzeugt valides XML', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.09');
+    assertValidXML(xml, 'pain.001.001.09');
+    assert.ok(xml.includes('<CstmrCdtTrfInitn>'), 'Fehlendes Root-Element');
+    assert.ok(xml.includes('<PmtMtd>TRF</PmtMtd>'), 'Falsche Zahlungsmethode');
+    assert.ok(xml.includes('<NbOfTxs>2</NbOfTxs>'), 'Falsche Transaktionsanzahl');
+    assert.ok(xml.includes('<CtrlSum>3500.00</CtrlSum>'), 'Falsche Kontrollsumme (1500+2000)');
+    assert.ok(xml.includes('Max Mustermann'), 'Fehlender Empfänger');
+    assert.ok(xml.includes('Erika Musterfrau'), 'Fehlender Empfänger');
+  });
+
+  it('5+ Transaktionen mit korrekter Summe', () => {
+    const rows = [];
+    for (let i = 0; i < 5; i++) {
+      rows.push({
+        Name: `Person ${i + 1}`,
+        IBAN: TEST_DATA.accounts[i % 3].iban,
+        BIC: TEST_DATA.accounts[i % 3].bic,
+        Betrag: (i + 1) * 100,
+        Verwendungszweck: `Zahlung ${i + 1}`,
+        Referenz: `REF-${i + 1}`,
+      });
+    }
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assertValidXML(xml, 'pain.001.001.09');
+    assert.ok(xml.includes('<NbOfTxs>5</NbOfTxs>'), 'Falsche Transaktionsanzahl');
+    // Summe: 100+200+300+400+500 = 1500
+    assert.ok(xml.includes('<CtrlSum>1500.00</CtrlSum>'), 'Falsche Kontrollsumme');
+  });
+
+  it('Referenz wird als EndToEndId im XML gesetzt', () => {
+    const rows = [{
+      Name: 'Test Empfänger', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 500, Verwendungszweck: 'Rechnung', Referenz: 'RE-2026-0042',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assert.ok(xml.includes('<EndToEndId>RE-2026-0042</EndToEndId>'), 'Fehlende End-to-End-ID');
+  });
+
+  it('fehlende Referenz wird als NOTPROVIDED gesetzt', () => {
+    const rows = [{
+      Name: 'Test Empfänger', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 500, Verwendungszweck: 'Ohne Referenz',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assert.ok(xml.includes('<EndToEndId>NOTPROVIDED</EndToEndId>'), 'Fehlende NOTPROVIDED End-to-End-ID');
+  });
+
+  it('Mandatsdatum als String wird korrekt geparsed', () => {
+    const rows = [{
+      Name: 'Anna Schmidt', IBAN: 'DE75512108001245126199', BIC: 'SOLADEST600',
+      Betrag: 25, Verwendungszweck: 'Beitrag', Mandatsreferenz: 'M-001', Mandatsdatum: '2025-03-20',
+    }];
+    const xml = excelToXML(rows, 'directDebit', 'pain.008.001.08');
+    assert.ok(xml.includes('<DtOfSgntr>2025-03-20</DtOfSgntr>'), 'Falsches Mandatsdatum');
+  });
+
+  it('ungültiges Mandatsdatum nutzt Fallback (heute)', () => {
+    const rows = [{
+      Name: 'Anna Schmidt', IBAN: 'DE75512108001245126199', BIC: 'SOLADEST600',
+      Betrag: 25, Verwendungszweck: 'Beitrag', Mandatsreferenz: 'M-001', Mandatsdatum: 'UNGUELTIG',
+    }];
+    // Sollte nicht werfen – ungültiges Datum führt zum Fallback auf new Date()
+    assert.doesNotThrow(() => {
+      const xml = excelToXML(rows, 'directDebit', 'pain.008.001.08');
+      assert.ok(xml.includes('<DtOfSgntr>'), 'Mandatsdatum-Element muss vorhanden sein');
+    });
+  });
+
+  it('Lastschrift-Vorlage funktioniert mit pain.008.001.02 (Legacy)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.02');
+    assertValidXML(xml, 'pain.008.001.02');
+    assert.ok(xml.includes('<CstmrDrctDbtInitn>'));
+    assert.ok(xml.includes('<CtrlSum>75.00</CtrlSum>'));
+  });
+
+  it('Überweisungs-Vorlage funktioniert mit pain.001.001.03', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.03');
+    assertValidXML(xml, 'pain.001.001.03');
+    assert.ok(xml.includes('<CstmrCdtTrfInitn>'));
+    assert.ok(xml.includes('<CtrlSum>3500.00</CtrlSum>'));
+  });
+
+  it('Überweisungs-Vorlage funktioniert mit pain.001.001.08', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.08');
+    assertValidXML(xml, 'pain.001.001.08');
+    assert.ok(xml.includes('<CstmrCdtTrfInitn>'));
+  });
+});
+
+// -------------------------------------------------------------------------
+// 13. Excel-Import: Fehlerfälle
+// -------------------------------------------------------------------------
+
+describe('Excel-Import: Fehlerfälle', () => {
+
+  it('leere Datei (0 Zeilen) ergibt leere Transaktionsliste', () => {
+    const result = processExcelRows([], 'transfer');
+    assert.strictEqual(result.length, 0);
+    // Hinweis: Die SEPA-Library wirft keinen Fehler bei 0 Transaktionen
+    // (A() prueft t && t.length, wobei t=0 falsy ist).
+    // Die Validierung "keine Daten" muss im Generator selbst erfolgen.
+  });
+
+  it('ungültige IBAN in Excel-Daten wird von SEPA-Library abgefangen', () => {
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE00000000000000000000', BIC: '',
+      Betrag: 100, Verwendungszweck: 'Test', Referenz: 'REF',
+    }];
+    assert.throws(() => {
+      excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, /IBAN/, 'Ungültige IBAN muss Fehler werfen');
+  });
+
+  it('Betrag = 0 in Excel wird von SEPA-Library abgefangen', () => {
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 0, Verwendungszweck: 'Test', Referenz: 'REF',
+    }];
+    assert.throws(() => {
+      excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, /amount/, 'Betrag 0 muss Fehler werfen');
+  });
+
+  it('negativer Betrag in Excel wird von SEPA-Library abgefangen', () => {
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: -50, Verwendungszweck: 'Test', Referenz: 'REF',
+    }];
+    assert.throws(() => {
+      excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, /amount/, 'Negativer Betrag muss Fehler werfen');
+  });
+
+  it('ungültige BIC-Länge in Excel wird von SEPA-Library abgefangen', () => {
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'ABC',
+      Betrag: 100, Verwendungszweck: 'Test', Referenz: 'REF',
+    }];
+    assert.throws(() => {
+      excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, /BIC/, 'Ungültige BIC-Länge muss Fehler werfen');
+  });
+
+  it('Verwendungszweck über 140 Zeichen wird abgefangen', () => {
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'A'.repeat(141), Referenz: 'REF',
+    }];
+    assert.throws(() => {
+      excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, /remittanceInfo/, 'Zu langer Verwendungszweck muss Fehler werfen');
+  });
+
+  it('fehlende Mandatsreferenz bei Lastschrift wird akzeptiert (leerer String)', () => {
+    // Hinweis: Die SEPA-Library erlaubt leere mandateId, weil F() mit
+    // "t && !t.match(...)" prueft — leerer String ist falsy und wird uebersprungen.
+    // Die Validierung muss im Generator vor dem Library-Aufruf erfolgen.
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'Test', Mandatsdatum: '2025-01-01',
+    }];
+    assert.doesNotThrow(() => {
+      excelToXML(rows, 'directDebit', 'pain.008.001.08');
+    }, 'Leere Mandatsreferenz wirft keinen Library-Fehler');
+  });
+});

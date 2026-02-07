@@ -296,6 +296,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     const config = JSON.parse(event.target.result);
 
+                    // Zahlungsart wiederherstellen (falls in Config vorhanden)
+                    if (config.paymentType) switchPaymentType(config.paymentType);
+
                     // Alle Felder aus der Config-Datei in die Formularfelder uebertragen
                     if (config.initiatorName) initiatorNameInput.value = config.initiatorName;
                     if (config.executionDate) executionDateInput.value = config.executionDate;
