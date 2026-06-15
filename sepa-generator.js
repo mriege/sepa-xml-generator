@@ -853,6 +853,26 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await file.arrayBuffer();
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+            // Eingabe kanonifizieren
+            const languageMapping = {
+                betrag: 'amount',
+                verwendungszweck: 'purpose',
+                mandatsreferenz: 'mandateid',
+                mandatsdatum: 'mandatedate',
+                referenz: 'reference',
+            };
+
+            const colCount = XLSX.utils.decode_range(firstSheet['!ref']).e.c + 1;
+            for (let c = 0; c < colCount; ++c) {
+                const headerRef = XLSX.utils.encode_cell({r: 0, c});
+                const headerCell = firstSheet[headerRef];
+                if (headerCell.t !== 's') continue;
+                headerCell.v = headerCell.v.trim().toLowerCase();
+                headerCell.v = languageMapping[headerCell.v] ?? headerCell.v;
+                headerCell.h = headerCell.w = headerCell.v;
+            }
+
             const rows = XLSX.utils.sheet_to_json(firstSheet);
 
             if (rows.length === 0) {
@@ -863,20 +883,20 @@ document.addEventListener('DOMContentLoaded', function() {
             // Spaltennamen werden flexibel erkannt (deutsch/englisch, Gross-/Kleinschreibung)
             currentTransactions = rows.map(row => {
                 const transaction = {
-                    name: row.Name || row.name || '',
-                    iban: (row.IBAN || row.iban || '').toString().replace(/\s/g, ''),
-                    bic: (row.BIC || row.bic || '').toString(),
-                    amount: parseFloat(row.Betrag || row.betrag || row.Amount || row.amount || 0),
-                    remittanceInfo: row.Verwendungszweck || row.verwendungszweck || row.Purpose || row.purpose || ''
+                    name: row.name || '',
+                    iban: (row.iban || '').toString().replace(/\s/g, ''),
+                    bic: (row.bic || '').toString(),
+                    amount: parseFloat(row.amount || 0),
+                    remittanceInfo: row.purpose || ''
                 };
 
                 // Lastschrift: Mandatsinformationen aus zusaetzlichen Spalten lesen
                 if (currentPaymentType === 'directDebit') {
-                    transaction.mandateId = row.Mandatsreferenz || row.mandatsreferenz || row.MandateId || row.mandateId || '';
-                    transaction.mandateSignatureDate = row.Mandatsdatum || row.mandatsdatum || row.MandateDate || row.mandateDate || '';
+                    transaction.mandateId = row.mandateid || '';
+                    transaction.mandateSignatureDate = row.mandatedate || '';
                 } else {
                     // Ueberweisung: Referenz aus optionaler Spalte lesen
-                    transaction.mandateId = row.Referenz || row.referenz || row.Reference || row.reference || '';
+                    transaction.mandateId = row.reference || '';
                 }
 
                 return transaction;
