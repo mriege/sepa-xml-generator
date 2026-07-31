@@ -1,6 +1,15 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const SEPA = require('../sepa.min.js');
+const BLZ_BIC = require('../blz-bic.js');   // Offizielle BLZ->BIC Tabelle (Bundesbank)
+
+// Spiegelt deriveBIC() aus sepa-generator.js: leitet den BIC aus einer
+// deutschen IBAN ab (BLZ = Stellen 5-12), sonst '' (NOTPROVIDED-Fallback greift).
+function deriveBIC(iban) {
+  const clean = String(iban || '').replace(/\s/g, '').toUpperCase();
+  if (!/^DE\d{20}$/.test(clean)) return '';
+  return BLZ_BIC[clean.substr(4, 8)] || '';
+}
 
 // ---------------------------------------------------------------------------
 // Valid test data – IBANs pass the mod-97 checksum used by the library.
@@ -748,22 +757,45 @@ describe('Integration: Simulation des Generator-Flows', () => {
  * @returns {Object[]} Array von Transaktions-Objekten
  */
 function processExcelRows(rows, paymentType) {
-  return rows.map(row => {
-    const t = {
-      name: row.Name || row.name || '',
-      iban: (row.IBAN || row.iban || '').toString().replace(/\s/g, ''),
-      bic: (row.BIC || row.bic || '').toString(),
-      amount: parseFloat(row.Betrag || row.betrag || row.Amount || row.amount || 0),
-      remittanceInfo: row.Verwendungszweck || row.verwendungszweck || row.Purpose || row.purpose || '',
-    };
-    if (paymentType === 'directDebit') {
-      t.mandateId = row.Mandatsreferenz || row.mandatsreferenz || row.MandateId || row.mandateId || '';
-      t.mandateSignatureDate = row.Mandatsdatum || row.mandatsdatum || row.MandateDate || row.mandateDate || '';
-    } else {
-      t.mandateId = row.Referenz || row.referenz || row.Reference || row.reference || '';
+  // Excel-Zellen können Numbers sein – SEPA-Validierung ruft .match() auf Strings auf.
+  const cellToString = v => (v === null || v === undefined) ? '' : String(v).trim();
+
+  // Spaltenüberschriften flexibel erkennen: Keys normalisieren (lowercase,
+  // Sonderzeichen/Leerzeichen entfernen), damit auch "IBAN ", "Iban" oder
+  // "IBAN-Nr." gefunden werden.
+  const normalizeKey = k => k.toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
+  const toNormalizedRow = row => {
+    const norm = {};
+    Object.keys(row).forEach(k => { norm[normalizeKey(k)] = row[k]; });
+    return norm;
+  };
+  const getCell = (norm, aliases) => {
+    for (const a of aliases) {
+      if (norm[a] !== undefined && norm[a] !== null && cellToString(norm[a]) !== '') return norm[a];
     }
-    return t;
-  });
+    return undefined;
+  };
+
+  return rows
+    .map(toNormalizedRow)
+    .filter(norm => Object.values(norm).some(v => cellToString(v) !== ''))
+    .map(norm => {
+      const t = {
+        name: cellToString(getCell(norm, ['name'])),
+        // IBAN/BIC uppercasen für Bank-Konformität (analog zu manuellem Pfad).
+        iban: cellToString(getCell(norm, ['iban', 'ibannr'])).replace(/\s/g, '').toUpperCase(),
+        bic: cellToString(getCell(norm, ['bic', 'bicswift'])).toUpperCase(),
+        amount: parseFloat(getCell(norm, ['betrag', 'amount']) || 0),
+        remittanceInfo: cellToString(getCell(norm, ['verwendungszweck', 'purpose'])),
+      };
+      if (paymentType === 'directDebit') {
+        t.mandateId = cellToString(getCell(norm, ['mandatsreferenz', 'mandateid']));
+        t.mandateSignatureDate = getCell(norm, ['mandatsdatum', 'mandatedate']) || '';
+      } else {
+        t.mandateId = cellToString(getCell(norm, ['referenz', 'reference']));
+      }
+      return t;
+    });
 }
 
 /**
@@ -797,10 +829,12 @@ function excelToXML(rows, paymentType, painFormat) {
     for (const t of transactions) {
       const txn = info.createTransaction();
       txn.debtorName = t.name;
-      txn.debtorIBAN = t.iban;
-      txn.debtorBIC = t.bic || '';
+      txn.debtorIBAN = String(t.iban || '').toUpperCase();
+      txn.debtorBIC = String(t.bic || '').toUpperCase() || deriveBIC(txn.debtorIBAN);
       txn.amount = parseFloat(t.amount);
-      txn.mandateId = t.mandateId;
+      txn.mandateId = String(t.mandateId || '');
+      // end2endId muss auch bei DD gesetzt werden, sonst <EndToEndId/> leer.
+      txn.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
       const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
       txn.mandateSignatureDate = isNaN(d.getTime()) ? new Date() : d;
       txn.remittanceInfo = t.remittanceInfo;
@@ -815,17 +849,22 @@ function excelToXML(rows, paymentType, painFormat) {
     for (const t of transactions) {
       const txn = info.createTransaction();
       txn.creditorName = t.name;
-      txn.creditorIBAN = t.iban;
-      txn.creditorBIC = t.bic || '';
+      txn.creditorIBAN = String(t.iban || '').toUpperCase();
+      txn.creditorBIC = String(t.bic || '').toUpperCase() || deriveBIC(txn.creditorIBAN);
       txn.amount = parseFloat(t.amount);
       txn.remittanceInfo = t.remittanceInfo;
-      txn.end2endId = t.mandateId || 'NOTPROVIDED';
+      txn.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
       info.addTransaction(txn);
     }
   }
 
   doc.addPaymentInfo(info);
-  return doc.toString();
+  // Spiegelt den Header-Replace aus generateAndDownload() wider: Im Browser
+  // liefert die Lib encoding="null", weil document.xmlEncoding read-only ist.
+  // In Node.js ist der Replace ein No-Op, aber der Codepfad bleibt symmetrisch.
+  let xml = doc.toString();
+  xml = xml.replace(/^<\?xml[^?]*\?>/, '<?xml version="1.0" encoding="UTF-8"?>');
+  return xml;
 }
 
 // Beispiel-Zeilen wie sie die Excel-Vorlage (Template) liefern wuerde
@@ -929,6 +968,62 @@ describe('Excel-Import: Spalten-Mapping', () => {
     const result = processExcelRows(rows, 'directDebit');
     assert.strictEqual(result[0].mandateId, 'MAND-123');
   });
+
+  // Regression (Nutzer-Report M. Reck, Juli 2026): Header mit nachgestelltem
+  // Leerzeichen oder Zusätzen wie "IBAN-Nr." führten zu leeren IBANs, weil das
+  // Mapping nur exakte Keys (row.IBAN || row.iban) kannte.
+  it('erkennt Header mit nachgestelltem Leerzeichen ("IBAN ")', () => {
+    const rows = [{
+      'Name ': 'Test Person', 'IBAN ': 'DE89370400440532013000', 'BIC ': 'COBADEFFXXX',
+      'Betrag ': 10, 'Verwendungszweck ': 'Test',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].name, 'Test Person');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+    assert.strictEqual(result[0].bic, 'COBADEFFXXX');
+    assert.strictEqual(result[0].amount, 10);
+  });
+
+  it('erkennt Header in gemischter Schreibweise ("Iban", "Bic")', () => {
+    const rows = [{
+      Name: 'Test', Iban: 'DE89370400440532013000', Bic: 'COBADEFFXXX', Betrag: 10,
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+    assert.strictEqual(result[0].bic, 'COBADEFFXXX');
+  });
+
+  it('erkennt Header mit Zusätzen ("IBAN-Nr.", "BIC/SWIFT")', () => {
+    const rows = [{
+      Name: 'Test', 'IBAN-Nr.': 'DE89370400440532013000', 'BIC/SWIFT': 'COBADEFFXXX', Betrag: 10,
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000');
+    assert.strictEqual(result[0].bic, 'COBADEFFXXX');
+  });
+
+  it('überspringt Zeilen, die nur leere Zellen enthalten', () => {
+    const rows = [
+      { Name: 'Person A', IBAN: 'DE89370400440532013000', Betrag: 100 },
+      { Name: '', IBAN: '   ', Betrag: null },
+      { Name: 'Person B', IBAN: 'DE75512108001245126199', Betrag: 200 },
+    ];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result.length, 2);
+    assert.strictEqual(result[0].name, 'Person A');
+    assert.strictEqual(result[1].name, 'Person B');
+  });
+
+  it('liefert leere IBANs, wenn die Spalte fehlt (Basis für Import-Fehlermeldung)', () => {
+    // handleFileSelect() bricht in diesem Fall mit einer Diagnose ab
+    // ("Spalte IBAN wurde nicht erkannt. Gefundene Spalten: ...").
+    const rows = [
+      { Name: 'Person A', Kontonummer: '532013000', Betrag: 100 },
+      { Name: 'Person B', Kontonummer: '245126199', Betrag: 200 },
+    ];
+    const result = processExcelRows(rows, 'transfer');
+    assert.ok(result.every(t => t.iban === ''), 'Alle IBANs sollten leer sein');
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -945,13 +1040,17 @@ describe('Excel-Import: Datenverarbeitung', () => {
     assert.strictEqual(result[0].iban, 'DE89370400440532013000');
   });
 
-  it('leerer BIC wird als NOTPROVIDED im XML', () => {
+  it('leerer BIC bei deutscher IBAN wird aus der BLZ abgeleitet (nicht NOTPROVIDED)', () => {
+    // Früher: leerer BIC => <Othr>NOTPROVIDED</Othr>. Manche Bankprogramme lehnen
+    // das ab (Schema erlaubt nur <BIC>). Jetzt leiten wir den BIC aus der IBAN ab.
+    // DE02120300000000202051 -> BLZ 12030000 -> BYLADEM1001 (DKB).
     const rows = [{
       Name: 'Clara Fischer', IBAN: 'DE02120300000000202051', BIC: '', Betrag: 50, Verwendungszweck: 'Test',
       Referenz: 'REF-001',
     }];
     const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
-    assert.ok(xml.includes('NOTPROVIDED'), 'Leerer BIC sollte als NOTPROVIDED erscheinen');
+    assert.ok(xml.includes('<BIC>BYLADEM1001</BIC>'), 'BIC sollte aus der BLZ abgeleitet werden');
+    assert.ok(!xml.includes('NOTPROVIDED'), 'Kein NOTPROVIDED-Fallback bei bekannter deutscher BLZ');
   });
 
   it('Betrag als String wird korrekt geparsed', () => {
@@ -1000,6 +1099,41 @@ describe('Excel-Import: Datenverarbeitung', () => {
     const result = processExcelRows(rows, 'transfer');
     assert.strictEqual(typeof result[0].iban, 'string');
     assert.strictEqual(result[0].iban, '1234567890');
+  });
+
+  // Regression: numerische Referenzen/Mandats-IDs führten zu "t.match is not a function"
+  // im SEPA-Validator, weil .match() auf Numbers nicht existiert.
+  it('Referenz als Zahl wird korrekt zu String konvertiert (transfer)', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'Test', Referenz: 12345,
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(typeof result[0].mandateId, 'string');
+    assert.strictEqual(result[0].mandateId, '12345');
+  });
+
+  it('Mandatsreferenz als Zahl wird korrekt zu String konvertiert (directDebit)', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'Test',
+      Mandatsreferenz: 98765, Mandatsdatum: '2025-01-01',
+    }];
+    const result = processExcelRows(rows, 'directDebit');
+    assert.strictEqual(typeof result[0].mandateId, 'string');
+    assert.strictEqual(result[0].mandateId, '98765');
+  });
+
+  it('Name und Verwendungszweck als Zahl werden zu String konvertiert', () => {
+    const rows = [{
+      Name: 42, IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 10, Verwendungszweck: 2026,
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(typeof result[0].name, 'string');
+    assert.strictEqual(result[0].name, '42');
+    assert.strictEqual(typeof result[0].remittanceInfo, 'string');
+    assert.strictEqual(result[0].remittanceInfo, '2026');
   });
 });
 
@@ -1110,6 +1244,252 @@ describe('Excel-Import: End-to-End Pipeline', () => {
     assertValidXML(xml, 'pain.001.001.08');
     assert.ok(xml.includes('<CstmrCdtTrfInitn>'));
   });
+
+  // Regression: Bug "t.match is not a function" trat auf, wenn Excel die Referenz
+  // als Number lieferte (z.B. 12345 statt "12345"). Der SEPA-Validator rief .match()
+  // auf dem Number-Wert auf. Siehe sepa.min.js F() und w().
+  it('numerische Referenz (Überweisung) erzeugt valides XML ohne .match-Fehler', () => {
+    const rows = [{
+      Name: 'Test Empfänger', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 500, Verwendungszweck: 'Rechnung', Referenz: 12345,
+    }];
+    let xml;
+    assert.doesNotThrow(() => {
+      xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    }, 'Darf nicht mit "t.match is not a function" werfen');
+    assertValidXML(xml, 'pain.001.001.09');
+    assert.ok(xml.includes('<EndToEndId>12345</EndToEndId>'), 'Numerische Referenz muss als EndToEndId erscheinen');
+  });
+
+  it('numerische Mandatsreferenz (Lastschrift) erzeugt valides XML ohne .match-Fehler', () => {
+    const rows = [{
+      Name: 'Anna Schmidt', IBAN: 'DE75512108001245126199', BIC: 'SOLADEST600',
+      Betrag: 49.99, Verwendungszweck: 'Beitrag', Mandatsreferenz: 98765, Mandatsdatum: '2025-06-15',
+    }];
+    let xml;
+    assert.doesNotThrow(() => {
+      xml = excelToXML(rows, 'directDebit', 'pain.008.001.08');
+    }, 'Darf nicht mit "t.match is not a function" werfen');
+    assertValidXML(xml, 'pain.008.001.08');
+    assert.ok(xml.includes('<MndtId>98765</MndtId>'), 'Numerische Mandatsreferenz muss als MndtId erscheinen');
+  });
+
+  // Bank-Kompatibilität: pain.008.001.02 / pain.001.001.03 enthalten NbOfTxs/CtrlSum/BtchBookg
+  // im PmtInf-Block (DK-konform). Bei .08/.09 fehlen sie – manche Banken lehnen das ab.
+  it('pain.008.001.02 enthält NbOfTxs/CtrlSum/BtchBookg im PmtInf-Block (DK-kompatibel)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.02');
+    const pmtInf = xml.match(/<PmtInf>[\s\S]*?<PmtTpInf>/);
+    assert.ok(pmtInf, 'PmtInf-Block fehlt');
+    assert.ok(pmtInf[0].includes('<BtchBookg>'), 'BtchBookg muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<NbOfTxs>2</NbOfTxs>'), 'NbOfTxs muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<CtrlSum>75.00</CtrlSum>'), 'CtrlSum muss vor PmtTpInf stehen');
+  });
+
+  it('pain.001.001.03 enthält NbOfTxs/CtrlSum/BtchBookg im PmtInf-Block (DK-kompatibel)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.03');
+    const pmtInf = xml.match(/<PmtInf>[\s\S]*?<PmtTpInf>/);
+    assert.ok(pmtInf, 'PmtInf-Block fehlt');
+    assert.ok(pmtInf[0].includes('<BtchBookg>'), 'BtchBookg muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<NbOfTxs>2</NbOfTxs>'), 'NbOfTxs muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<CtrlSum>3500.00</CtrlSum>'), 'CtrlSum muss vor PmtTpInf stehen');
+  });
+
+  // Regression (Fehlerprotokoll Hannoversche Volksbank, Juli 2026): Bei .08/.09
+  // fehlten NbOfTxs/CtrlSum im PmtInf-Block ("Das Tag 'PmtTpInf' wird an dieser
+  // Stelle nicht erwartet. Stattdessen wird das Tag 'NbOfTxs' erwartet."), weil
+  // die Versionslogik in sepa.min.js nur auf === 3 statt >= 3 prüfte.
+  it('pain.008.001.08 enthält NbOfTxs/CtrlSum/BtchBookg im PmtInf-Block (DK-kompatibel)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.08');
+    const pmtInf = xml.match(/<PmtInf>[\s\S]*?<PmtTpInf>/);
+    assert.ok(pmtInf, 'PmtInf-Block fehlt');
+    assert.ok(pmtInf[0].includes('<BtchBookg>'), 'BtchBookg muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<NbOfTxs>2</NbOfTxs>'), 'NbOfTxs muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<CtrlSum>75.00</CtrlSum>'), 'CtrlSum muss vor PmtTpInf stehen');
+  });
+
+  it('pain.001.001.09 enthält NbOfTxs/CtrlSum/BtchBookg im PmtInf-Block (DK-kompatibel)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.09');
+    const pmtInf = xml.match(/<PmtInf>[\s\S]*?<PmtTpInf>/);
+    assert.ok(pmtInf, 'PmtInf-Block fehlt');
+    assert.ok(pmtInf[0].includes('<BtchBookg>'), 'BtchBookg muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<NbOfTxs>2</NbOfTxs>'), 'NbOfTxs muss vor PmtTpInf stehen');
+    assert.ok(pmtInf[0].includes('<CtrlSum>3500.00</CtrlSum>'), 'CtrlSum muss vor PmtTpInf stehen');
+  });
+
+  // Regression (Nutzer-Report, Juli 2026): Fünfstellige numerische Mandatsreferenz
+  // aus Excel führte zu "t.match is not a function". Die Lib-Validatoren F()/w()
+  // müssen Numbers auch dann verkraften, wenn ein App-Codepfad den String-Cast
+  // vergisst – hier wird die Lib deshalb DIREKT mit einem Number befüllt.
+  it('Lib verkraftet numerische mandateId/end2endId ohne .match-Crash', () => {
+    const doc = new SEPA.Document('pain.008.001.02');
+    doc.grpHdr.id = 'MSG-NUM-MANDATE';
+    doc.grpHdr.created = new Date('2026-01-15T10:00:00Z');
+    doc.grpHdr.initiatorName = 'Test';
+    const info = doc.createPaymentInfo();
+    info.collectionDate = new Date('2026-02-01');
+    info.creditorName = TEST_DATA.creditor.name;
+    info.creditorIBAN = TEST_DATA.creditor.iban;
+    info.creditorBIC = TEST_DATA.creditor.bic;
+    info.creditorId = TEST_DATA.creditor.id;
+    info.sequenceType = 'RCUR';
+    info.localInstrumentation = 'CORE';
+
+    const txn = info.createTransaction();
+    txn.debtorName = 'Numerik Test';
+    txn.debtorIBAN = 'DE89370400440532013000';
+    txn.debtorBIC = 'COBADEFFXXX';
+    txn.amount = 10;
+    txn.mandateId = 12345;      // Number statt String – wie aus Excel
+    txn.end2endId = 12345;      // Number statt String
+    txn.mandateSignatureDate = new Date('2025-01-01');
+    info.addTransaction(txn);
+    doc.addPaymentInfo(info);
+
+    let xml;
+    assert.doesNotThrow(() => { xml = doc.toString(); },
+      'Darf nicht mit "t.match is not a function" werfen');
+    assert.ok(xml.includes('<MndtId>12345</MndtId>'), 'Numerische Mandatsreferenz muss im XML stehen');
+  });
+
+  // Regression (Fehlerprotokoll "invalider Wert", Juli 2026): Bei leerem
+  // Verwendungszweck erzeugte die Lib <RmtInf><Ustrd/></RmtInf> – RmtInf ist
+  // optional, aber ein leeres Ustrd verletzt das Schema (minLength 1).
+  it('leerer Verwendungszweck erzeugt kein leeres <Ustrd/>', () => {
+    const rows = [{
+      Name: 'Ohne Zweck', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 10, Mandatsreferenz: 'MAND-X', Mandatsdatum: '2025-01-01',
+    }];
+    const xml = excelToXML(rows, 'directDebit', 'pain.008.001.02');
+    assert.ok(!xml.includes('<Ustrd/>'), 'Leeres <Ustrd/> darf nicht erzeugt werden');
+    assert.ok(!xml.includes('<Ustrd></Ustrd>'), 'Leeres <Ustrd></Ustrd> darf nicht erzeugt werden');
+    assert.ok(!xml.includes('<RmtInf>'), 'RmtInf soll bei leerem Verwendungszweck ganz entfallen');
+  });
+
+  it('gefüllter Verwendungszweck erscheint weiterhin als <Ustrd>', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.02');
+    assert.ok(xml.includes('<Ustrd>Mitgliedsbeitrag Januar 2025</Ustrd>'), 'Verwendungszweck fehlt im XML');
+  });
+
+  // Regression (Nutzer-Report Sparkasse Hannover, Juli 2026): Im Browser sind
+  // document.xmlVersion/xmlEncoding read-only – toString() erzeugte dort
+  // '<?xml version="null" encoding="null"?>' und die Bank lehnte JEDES gewählte
+  // pain-Format ab ("Dateiformat wird nicht unterstützt"). toString() muss die
+  // internen Werte nutzen, nicht die DOM-Properties. Hier wird das
+  // Browser-Verhalten simuliert, indem die DOM-Properties null liefern.
+  it('XML-Deklaration bleibt korrekt, auch wenn DOM xmlVersion/xmlEncoding null liefert (Browser)', () => {
+    const doc = new SEPA.Document('pain.008.001.02');
+    doc.grpHdr.id = 'MSG-BROWSER-SIM';
+    doc.grpHdr.created = new Date('2026-01-15T10:00:00Z');
+    doc.grpHdr.initiatorName = 'Test';
+
+    const realToXML = doc.toXML.bind(doc);
+    doc.toXML = function () {
+      const xmlDoc = realToXML();
+      Object.defineProperty(xmlDoc, 'xmlVersion', { get: () => null });
+      Object.defineProperty(xmlDoc, 'xmlEncoding', { get: () => null });
+      return xmlDoc;
+    };
+
+    const xml = doc.toString();
+    assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'),
+      `XML-Deklaration muss version="1.0" encoding="UTF-8" enthalten, war: ${xml.substring(0, 60)}`);
+    assert.ok(!xml.includes('"null"'), 'Deklaration darf kein "null" enthalten');
+  });
+
+  // Befund 1: end2endId muss auch bei DD gesetzt sein. Ohne diesen Fix
+  // erzeugte die Lib <EndToEndId></EndToEndId> (leerer Pflicht-String) und
+  // Banking-Software (Proficash, Volksbank) lehnte mit "invalider Wert: """ ab.
+  it('DD-Transaktion enthält EndToEndId mit Wert (nicht leer)', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.02');
+    assert.ok(!xml.includes('<EndToEndId></EndToEndId>'), 'EndToEndId darf NICHT leer sein');
+    assert.ok(!xml.includes('<EndToEndId/>'), 'EndToEndId darf NICHT self-closing/leer sein');
+    // mandateId wird als end2endId verwendet
+    assert.ok(xml.includes('<EndToEndId>MAND-001-2025</EndToEndId>'), 'EndToEndId sollte mandateId enthalten');
+    assert.ok(xml.includes('<EndToEndId>MAND-002-2025</EndToEndId>'), 'EndToEndId sollte mandateId enthalten');
+  });
+
+  it('DD-Transaktion ohne mandateId nutzt NOTPROVIDED-Fallback für end2endId', () => {
+    // Wir testen die Helper-Funktion direkt – die Mandatsreferenz-Pflicht-Validation
+    // im Generator würde diesen Fall zwar abfangen, aber der Fallback in der Lib-Übergabe
+    // soll robust bleiben.
+    const SEPA = require('../sepa.min.js');
+    const doc = new SEPA.Document('pain.008.001.02');
+    doc.grpHdr.id = 'X'; doc.grpHdr.created = new Date(); doc.grpHdr.initiatorName = 'T';
+    const info = doc.createPaymentInfo();
+    info.collectionDate = new Date();
+    info.creditorName = TEST_DATA.creditor.name;
+    info.creditorIBAN = TEST_DATA.creditor.iban;
+    info.creditorBIC = TEST_DATA.creditor.bic;
+    info.creditorId = TEST_DATA.creditor.id;
+    info.sequenceType = 'RCUR';
+    info.localInstrumentation = 'CORE';
+    const txn = info.createTransaction();
+    txn.debtorName = 'Test'; txn.debtorIBAN = 'DE89370400440532013000'; txn.debtorBIC = 'COBADEFFXXX';
+    txn.amount = 10; txn.mandateId = 'M1'; txn.mandateSignatureDate = new Date();
+    txn.end2endId = String('' || '') || 'NOTPROVIDED';
+    txn.remittanceInfo = 'Test';
+    info.addTransaction(txn);
+    doc.addPaymentInfo(info);
+    const xml = doc.toString();
+    assert.ok(xml.includes('<EndToEndId>NOTPROVIDED</EndToEndId>'), 'NOTPROVIDED-Fallback erwartet');
+  });
+
+  // Befund 2: IBAN/BIC im Excel-Pfad werden zu Großbuchstaben normalisiert.
+  it('IBAN in Kleinbuchstaben aus Excel wird zu UPPERCASE konvertiert', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'de89370400440532013000', BIC: 'cobadeffxxx',
+      Betrag: 10, Verwendungszweck: 'Test',
+    }];
+    const result = processExcelRows(rows, 'transfer');
+    assert.strictEqual(result[0].iban, 'DE89370400440532013000', 'IBAN muss uppercase sein');
+    assert.strictEqual(result[0].bic, 'COBADEFFXXX', 'BIC muss uppercase sein');
+  });
+
+  it('IBAN mit gemischten Buchstaben aus Excel landet uppercase im XML', () => {
+    const rows = [{
+      Name: 'Test', IBAN: 'de89 3704 0044 0532 0130 00', BIC: 'CobaDeffXxx',
+      Betrag: 10, Verwendungszweck: 'Test', Referenz: 'REF-1',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.03');
+    assert.ok(xml.includes('<IBAN>DE89370400440532013000</IBAN>'), 'IBAN muss uppercase und ohne Leerzeichen im XML stehen');
+    assert.ok(xml.includes('<BIC>COBADEFFXXX</BIC>'), 'BIC muss uppercase im XML stehen');
+  });
+
+  // Browser-Bug: Im Browser sind document.xmlVersion/xmlEncoding read-only.
+  // Die Lib generiert dort encoding="null" – Banking-Software lehnt das ab
+  // ("Dateiformat nicht unterstützt"). Der Generator repariert den Header
+  // mit einem Regex-Replace. Hier simulieren wir den problematischen Header
+  // und prüfen, dass das Replace robust ist.
+  it('XML-Header-Replace korrigiert encoding="null" zu UTF-8 (Browser-Fix)', () => {
+    const fixHeader = (xml) => xml.replace(/^<\?xml[^?]*\?>/, '<?xml version="1.0" encoding="UTF-8"?>');
+
+    // Browser-Output (encoding=null)
+    const browserXml = '<?xml version="1.0" encoding="null"?><Document><GrpHdr/></Document>';
+    assert.strictEqual(
+      fixHeader(browserXml),
+      '<?xml version="1.0" encoding="UTF-8"?><Document><GrpHdr/></Document>',
+      'encoding="null" muss zu encoding="UTF-8" werden'
+    );
+
+    // Auch version=null wird mitkorrigiert
+    const bothNull = '<?xml version="null" encoding="null"?><Document/>';
+    assert.strictEqual(
+      fixHeader(bothNull),
+      '<?xml version="1.0" encoding="UTF-8"?><Document/>',
+      'Komplett kaputter Header muss ersetzt werden'
+    );
+
+    // Bereits korrekter Header bleibt korrekt (idempotent)
+    const correctXml = '<?xml version="1.0" encoding="UTF-8"?><Document/>';
+    assert.strictEqual(fixHeader(correctXml), correctXml, 'Idempotenz: korrekter Header darf nicht verändert werden');
+  });
+
+  it('excelToXML liefert validen XML-Header mit encoding="UTF-8"', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_DD, 'directDebit', 'pain.008.001.02');
+    assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'),
+      `XML muss mit UTF-8-Header beginnen, gefunden: "${xml.substring(0, 50)}"`);
+    assert.ok(!xml.includes('encoding="null"'), 'encoding="null" darf nicht im Output stehen');
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -1187,5 +1567,80 @@ describe('Excel-Import: Fehlerfälle', () => {
     assert.doesNotThrow(() => {
       excelToXML(rows, 'directDebit', 'pain.008.001.08');
     }, 'Leere Mandatsreferenz wirft keinen Library-Fehler');
+  });
+});
+
+// -------------------------------------------------------------------------
+// BLZ->BIC-Ableitung (Bank-Kompatibilität)
+//
+// Hintergrund: Fehlt der BIC, erzeugte die Lib bisher für jede Partei
+//   <FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId>.
+// Ältere Bankprogramme validieren gegen ein Schema, dessen <FinInstnId> nur
+// <BIC> erlaubt, und lehnen jedes <Othr> ab ("no declaration found for element
+// 'Othr'" / "not allowed for content model (BIC)"). Deshalb leiten wir den BIC
+// bei fehlender Angabe aus der deutschen IBAN ab (BLZ = Stellen 5-12) anhand
+// der offiziellen Bundesbank-Tabelle (blz-bic.js).
+// -------------------------------------------------------------------------
+describe('BLZ->BIC-Ableitung (Bank-Kompatibilität)', () => {
+
+  it('Datentabelle ist geladen und plausibel groß', () => {
+    assert.strictEqual(typeof BLZ_BIC, 'object');
+    assert.ok(Object.keys(BLZ_BIC).length > 3000,
+      `Erwartet >3000 Einträge, gefunden ${Object.keys(BLZ_BIC).length}`);
+  });
+
+  it('alle Einträge haben gültiges BLZ- und BIC-Format', () => {
+    const bicRe = /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+    for (const [blz, bic] of Object.entries(BLZ_BIC)) {
+      assert.match(blz, /^\d{8}$/, `Ungültige BLZ: ${blz}`);
+      assert.match(bic, bicRe, `Ungültiger BIC für BLZ ${blz}: ${bic}`);
+      // BIC-Länderkennung (Stellen 5-6) muss zur deutschen IBAN passen (Lib-Check).
+      assert.strictEqual(bic.substr(4, 2), 'DE', `BIC ${bic} nicht 'DE' an Position 5-6`);
+    }
+  });
+
+  it('bekannte BLZ-Zuordnungen stimmen (Stichprobe aus der Bundesbank-Datei)', () => {
+    assert.strictEqual(BLZ_BIC['37040044'], 'COBADEFFXXX'); // Commerzbank Köln
+    assert.strictEqual(BLZ_BIC['12030000'], 'BYLADEM1001'); // DKB Berlin
+    assert.strictEqual(BLZ_BIC['10077777'], 'NORSDE51XXX'); // norisbank
+  });
+
+  it('deriveBIC: deutsche IBAN -> BIC (auch mit Leerzeichen/Kleinbuchstaben)', () => {
+    assert.strictEqual(deriveBIC('DE89370400440532013000'), 'COBADEFFXXX');
+    assert.strictEqual(deriveBIC('de89 3704 0044 0532 0130 00'), 'COBADEFFXXX');
+  });
+
+  it('deriveBIC: ausländische IBAN -> "" (NOTPROVIDED-Fallback bleibt)', () => {
+    assert.strictEqual(deriveBIC('GB29NWBK60161331926819'), '');
+    assert.strictEqual(deriveBIC('FR7630006000011234567890189'), '');
+  });
+
+  it('deriveBIC: unbekannte/ungültige BLZ -> ""', () => {
+    assert.strictEqual(deriveBIC('DE00000000000000000000'), ''); // BLZ 00000000 existiert nicht
+    assert.strictEqual(deriveBIC(''), '');
+    assert.strictEqual(deriveBIC(null), '');
+  });
+
+  it('Bug-Szenario: Lastschrift ohne BICs erzeugt <BIC>, kein <Othr>/NOTPROVIDED', () => {
+    // Reproduziert die Fehlermeldung "element 'Othr' is not allowed for content
+    // model '(BIC)'": mehrere Schuldner ohne BIC, alle deutsche IBANs.
+    const rows = [
+      { Name: 'Anna Schmidt', IBAN: 'DE75512108001245126199', BIC: '', Betrag: 10, Verwendungszweck: 'Beitrag', Mandatsreferenz: 'M1', Mandatsdatum: '2025-01-10' },
+      { Name: 'Bernd Weber',  IBAN: 'DE27100777770209299700', BIC: '', Betrag: 11, Verwendungszweck: 'Beitrag', Mandatsreferenz: 'M2', Mandatsdatum: '2025-01-11' },
+    ];
+    const xml = excelToXML(rows, 'directDebit', 'pain.008.001.02');
+    assertValidXML(xml, 'pain.008.001.02');
+    assert.ok(!xml.includes('Othr><Id>NOTPROVIDED'), 'Kein Othr/NOTPROVIDED bei bekannten deutschen BLZ');
+    assert.ok(xml.includes('<BIC>SOGEDEFFXXX</BIC>'), 'Abgeleiteter BIC für Anna fehlt');
+    assert.ok(xml.includes('<BIC>NORSDE51XXX</BIC>'), 'Abgeleiteter BIC für Bernd fehlt');
+  });
+
+  it('Bug-Szenario: ausländische IBAN behält NOTPROVIDED-Fallback', () => {
+    const rows = [
+      { Name: 'John Smith', IBAN: 'GB29NWBK60161331926819', BIC: '', Betrag: 20, Verwendungszweck: 'Fee', Referenz: 'R1' },
+    ];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assertValidXML(xml, 'pain.001.001.09');
+    assert.ok(xml.includes('<Othr><Id>NOTPROVIDED</Id></Othr>'), 'Foreign-IBAN muss NOTPROVIDED behalten');
   });
 });

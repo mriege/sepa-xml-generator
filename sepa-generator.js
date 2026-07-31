@@ -409,13 +409,17 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {string} type - 'directDebit' oder 'transfer'
      */
     function updatePainFormatOptions(type) {
+        // Default auf .02/.03: Diese Versionen enthalten NbOfTxs/CtrlSum im PmtInf-Block
+        // wie es die deutsche Kreditwirtschaft (DK) verlangt. Neuere Versionen (.08/.09)
+        // werden von manchen Banken (z.B. Hannoversche Volksbank) abgelehnt mit
+        // "PmtTpInf wird an dieser Stelle nicht erwartet, NbOfTxs erwartet".
         const options = type === 'directDebit' ? [
-            { value: 'pain.008.001.02', text: 'pain.008.001.02 (Ältere Version - hohe Kompatibilität)' },
-            { value: 'pain.008.001.08', text: 'pain.008.001.08 (Aktuelle Version - EMPFOHLEN) ⭐', selected: true }
+            { value: 'pain.008.001.02', text: 'pain.008.001.02 (Bank-kompatibel - EMPFOHLEN) ⭐', selected: true },
+            { value: 'pain.008.001.08', text: 'pain.008.001.08 (Neueres ISO-Schema - nicht alle Banken)' }
         ] : [
-            { value: 'pain.001.001.03', text: 'pain.001.001.03 (Ältere Version - hohe Kompatibilität)' },
-            { value: 'pain.001.001.08', text: 'pain.001.001.08 (Neuere Version)' },
-            { value: 'pain.001.001.09', text: 'pain.001.001.09 (Neueste Version - EMPFOHLEN) ⭐', selected: true }
+            { value: 'pain.001.001.03', text: 'pain.001.001.03 (Bank-kompatibel - EMPFOHLEN) ⭐', selected: true },
+            { value: 'pain.001.001.08', text: 'pain.001.001.08 (Neueres ISO-Schema)' },
+            { value: 'pain.001.001.09', text: 'pain.001.001.09 (Neuestes ISO-Schema - nicht alle Banken)' }
         ];
 
         // Dropdown leeren und mit neuen Optionen befuellen
@@ -850,8 +854,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             // Excel-Datei als ArrayBuffer lesen und mit XLSX parsen
+            // cellDates:true → Excel-Datumsseriennummern werden zu JS Date-Objekten,
+            // damit new Date(...) sie korrekt verarbeitet (ohne diese Option würde
+            // z.B. 45658 als Millisekunden seit 1970 interpretiert).
             const data = await file.arrayBuffer();
-            const workbook = XLSX.read(data, { type: 'array' });
+            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(firstSheet);
 
@@ -859,31 +866,90 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error('Die Excel-Datei enthält keine Daten.');
             }
 
-            // Zeilen in Transaktions-Objekte umwandeln
-            // Spaltennamen werden flexibel erkannt (deutsch/englisch, Gross-/Kleinschreibung)
-            currentTransactions = rows.map(row => {
-                const transaction = {
-                    name: row.Name || row.name || '',
-                    iban: (row.IBAN || row.iban || '').toString().replace(/\s/g, ''),
-                    bic: (row.BIC || row.bic || '').toString(),
-                    amount: parseFloat(row.Betrag || row.betrag || row.Amount || row.amount || 0),
-                    remittanceInfo: row.Verwendungszweck || row.verwendungszweck || row.Purpose || row.purpose || ''
-                };
+            // Excel-Zellen können Numbers sein (z.B. Referenz "12345") – SEPA-Validierung
+            // erwartet Strings und ruft .match() auf, was auf Numbers crasht.
+            const cellToString = v => (v === null || v === undefined) ? '' : String(v).trim();
 
-                // Lastschrift: Mandatsinformationen aus zusaetzlichen Spalten lesen
-                if (currentPaymentType === 'directDebit') {
-                    transaction.mandateId = row.Mandatsreferenz || row.mandatsreferenz || row.MandateId || row.mandateId || '';
-                    transaction.mandateSignatureDate = row.Mandatsdatum || row.mandatsdatum || row.MandateDate || row.mandateDate || '';
-                } else {
-                    // Ueberweisung: Referenz aus optionaler Spalte lesen
-                    transaction.mandateId = row.Referenz || row.referenz || row.Reference || row.reference || '';
+            // Spaltenüberschriften flexibel erkennen: Keys normalisieren (lowercase,
+            // Sonderzeichen/Leerzeichen entfernen), damit auch "IBAN ", "Iban" oder
+            // "IBAN-Nr." gefunden werden. Nutzer-Excels weichen hier oft minimal ab –
+            // ein nachgestelltes Leerzeichen im Header führte sonst zu leeren IBANs.
+            const normalizeKey = k => k.toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
+            const toNormalizedRow = row => {
+                const norm = {};
+                Object.keys(row).forEach(k => { norm[normalizeKey(k)] = row[k]; });
+                return norm;
+            };
+            const getCell = (norm, aliases) => {
+                for (const a of aliases) {
+                    if (norm[a] !== undefined && norm[a] !== null && cellToString(norm[a]) !== '') return norm[a];
                 }
+                return undefined;
+            };
 
-                return transaction;
-            });
+            // Zeilen in Transaktions-Objekte umwandeln (leere Zeilen überspringen)
+            const transactions = rows
+                .map(toNormalizedRow)
+                .filter(norm => Object.values(norm).some(v => cellToString(v) !== ''))
+                .map(norm => {
+                    const transaction = {
+                        name: cellToString(getCell(norm, ['name'])),
+                        // IBAN/BIC uppercasen analog zum manuellen Pfad (addManualTransaction):
+                        // Banken erwarten formal Großbuchstaben im XML-Output.
+                        iban: cellToString(getCell(norm, ['iban', 'ibannr'])).replace(/\s/g, '').toUpperCase(),
+                        bic: cellToString(getCell(norm, ['bic', 'bicswift'])).toUpperCase(),
+                        amount: parseFloat(getCell(norm, ['betrag', 'amount']) || 0),
+                        remittanceInfo: cellToString(getCell(norm, ['verwendungszweck', 'purpose']))
+                    };
+
+                    // Lastschrift: Mandatsinformationen aus zusaetzlichen Spalten lesen
+                    if (currentPaymentType === 'directDebit') {
+                        transaction.mandateId = cellToString(getCell(norm, ['mandatsreferenz', 'mandateid']));
+                        // Rohwert beibehalten (Date-Objekt oder String) – new Date(...) verarbeitet beides.
+                        transaction.mandateSignatureDate = getCell(norm, ['mandatsdatum', 'mandatedate']) || '';
+                    } else {
+                        // Ueberweisung: Referenz aus optionaler Spalte lesen
+                        transaction.mandateId = cellToString(getCell(norm, ['referenz', 'reference']));
+                    }
+
+                    return transaction;
+                });
+
+            if (transactions.length === 0) {
+                throw new Error('Die Excel-Datei enthält keine Daten.');
+            }
+
+            // Import-Validierung: Wenn KEINE Zeile eine IBAN bzw. einen Namen hat,
+            // wurde die Spalte nicht erkannt – konkrete Diagnose statt stiller Import,
+            // sonst landet der Nutzer später bei irreführenden Formular-Fehlermeldungen.
+            const foundColumns = Object.keys(rows[0]).map(k => `"${k}"`).join(', ');
+            const expectedColumns = currentPaymentType === 'directDebit'
+                ? 'Name, IBAN, BIC, Betrag, Verwendungszweck, Mandatsreferenz, Mandatsdatum'
+                : 'Name, IBAN, BIC, Betrag, Verwendungszweck, Referenz';
+            const columnHint = `Gefundene Spalten: ${foundColumns}. Erwartete Überschriften (Zeile 1 des ersten Arbeitsblatts, Groß-/Kleinschreibung egal): ${expectedColumns}. Das Zellformat (Text/Zahl/Standard) spielt keine Rolle.`;
+
+            if (transactions.every(t => !t.iban)) {
+                throw new Error(`Spalte "IBAN" wurde nicht erkannt. ${columnHint}`);
+            }
+            if (transactions.every(t => !t.name)) {
+                throw new Error(`Spalte "Name" wurde nicht erkannt. ${columnHint}`);
+            }
+
+            currentTransactions = transactions;
 
             // Vorschautabelle aktualisieren
             updatePreview();
+
+            // Einzelne lückenhafte Zeilen: Import zulassen, aber konkret warnen.
+            // +2 = Excel-Zeilennummer (Zeile 1 ist die Kopfzeile).
+            const incompleteRows = transactions
+                .map((t, i) => (!t.iban || !t.name) ? i + 2 : null)
+                .filter(n => n !== null);
+            if (incompleteRows.length > 0) {
+                showError(`⚠️ In Excel-Zeile ${incompleteRows.join(', ')} fehlt Name oder IBAN. Die übrigen Zeilen wurden importiert – bitte fehlende Angaben ergänzen und erneut hochladen (oder die Zeilen in der Vorschau entfernen).`);
+            } else {
+                showSuccess(`✓ ${transactions.length} Transaktionen aus der Excel-Datei importiert.`);
+            }
 
         } catch (error) {
             showError(`Fehler beim Lesen der Datei: ${error.message}`);
@@ -979,21 +1045,54 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        if (currentPaymentType === 'directDebit') {
+        // pain-Format ist Single-Source-of-Truth: Die Lib leitet method/_type
+        // intern daraus ab. currentPaymentType (UI-Variable) kann theoretisch
+        // davon abweichen (z.B. nach manuellem Format-Wechsel), deshalb basieren
+        // wir Validation und Lib-Konfiguration auf dem painFormat.
+        const painFormat = painFormatSelect.value;
+        const isDirectDebit = painFormat.indexOf('pain.008') === 0;
+
+        if (isDirectDebit) {
             if (!creditorNameInput.value || !creditorIBANInput.value || !creditorIdInput.value) {
-                showError('Bitte füllen Sie alle Gläubiger-Felder aus!');
+                showError('Bitte füllen Sie im Abschnitt „Empfänger-Daten (Gläubiger)" Ihren Namen, Ihre IBAN und Ihre Gläubiger-ID aus. Das sind Ihre eigenen Daten im Formular oben – sie kommen nicht aus der Excel-Datei.');
+                return;
+            }
+            // Mandatsreferenz ist bei Lastschrift Pflicht – ohne Wert wird die XML
+            // mit leerem <MndtId/> erzeugt und von Bank-Software (z.B. Proficash,
+            // Hannoversche Volksbank) wegen "invaliden Wert" abgelehnt.
+            const missingMandate = currentTransactions.findIndex(t => !String(t.mandateId || '').trim());
+            if (missingMandate !== -1) {
+                showError(`Mandatsreferenz fehlt für Transaktion ${missingMandate + 1} (${currentTransactions[missingMandate].name || 'ohne Namen'}). Bei Lastschriften ist die Mandatsreferenz Pflicht – bitte Excel-Spalte "Mandatsreferenz" befüllen.`);
+                return;
+            }
+            // Mandatsdatum (Unterschriftsdatum) darf nicht NACH dem Fälligkeits-/
+            // Einzugsdatum liegen: ein Mandat muss vor dem Einzug unterschrieben
+            // sein. Sonst lehnt die Bank die Datei ab mit "ungültiger Wert beim
+            // Element DtOfSgntr". Wir fangen das ab, bevor die Datei entsteht.
+            const collInput = executionDateInput.value ? new Date(executionDateInput.value) : null;
+            const collDate = (collInput && !isNaN(collInput.getTime())) ? collInput : new Date();
+            const collStr = collDate.toISOString().substr(0, 10);
+            const badDates = [];
+            currentTransactions.forEach((t, i) => {
+                if (!t.mandateSignatureDate) return;              // ohne Angabe => Fallback heute (unkritisch)
+                const d = new Date(t.mandateSignatureDate);
+                if (isNaN(d.getTime())) return;                   // ungültiges Datum => Lib-Fallback greift
+                const sigStr = d.toISOString().substr(0, 10);
+                if (sigStr > collStr) badDates.push(`Zeile ${i + 1} (${t.name || 'ohne Namen'}): ${sigStr}`);
+            });
+            if (badDates.length) {
+                showError(`Das Mandatsdatum (Unterschriftsdatum) darf nicht nach dem Ausführungs-/Fälligkeitsdatum (${collStr}) liegen – ein SEPA-Mandat muss vor dem Einzug unterschrieben sein. Bitte korrigieren Sie folgende Zeilen (Spalte „Mandatsdatum"): ${badDates.join('; ')}`);
                 return;
             }
         } else {
             if (!debtorNameInput.value || !debtorIBANInput.value) {
-                showError('Bitte füllen Sie alle Zahler-Felder aus!');
+                showError('Bitte füllen Sie im Abschnitt „Auftraggeber-Daten" Ihren Namen und Ihre IBAN aus. Das sind Ihre eigenen Kontodaten (Zahler) im Formular oben – sie kommen nicht aus der Excel-Datei.');
                 return;
             }
         }
 
         try {
             // === Schritt 2: SEPA-Dokument erstellen ===
-            const painFormat = painFormatSelect.value;
             const doc = new SEPA.Document(painFormat);
 
             // === Schritt 3: GroupHeader konfigurieren ===
@@ -1004,20 +1103,24 @@ document.addEventListener('DOMContentLoaded', function() {
             // === Schritt 4: PaymentInfo erstellen und konfigurieren ===
             const info = doc.createPaymentInfo();
 
-            // Ausfuehrungsdatum setzen (je nach Zahlungsart unterschiedliches Feld)
-            // Fallback auf heutiges Datum wenn kein Datum angegeben
-            if (currentPaymentType === 'directDebit') {
-                info.collectionDate = new Date(executionDateInput.value || new Date());
-            } else {
-                info.requestedExecutionDate = new Date(executionDateInput.value || new Date());
-            }
+            // Ausfuehrungsdatum setzen. Wir setzen BEIDE Felder unabhängig vom
+            // pain-Format, damit die Lib-Validierung robust ist – egal ob sie
+            // collectionDate (Lastschrift) oder requestedExecutionDate
+            // (Ueberweisung) prueft. Verhindert "invalid date null".
+            const inputDate = executionDateInput.value ? new Date(executionDateInput.value) : null;
+            const executionDate = (inputDate && !isNaN(inputDate.getTime())) ? inputDate : new Date();
+            info.collectionDate = executionDate;
+            info.requestedExecutionDate = executionDate;
 
-            if (currentPaymentType === 'directDebit') {
+            if (isDirectDebit) {
                 // --- Lastschrift-Konfiguration ---
                 info.creditorName = creditorNameInput.value;
-                info.creditorIBAN = creditorIBANInput.value.replace(/\s/g, '');
-                if (creditorBICInput.value) info.creditorBIC = creditorBICInput.value;
-                info.creditorId = creditorIdInput.value;
+                info.creditorIBAN = creditorIBANInput.value.replace(/\s/g, '').toUpperCase();
+                // BIC aus Eingabe oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
+                info.creditorBIC = creditorBICInput.value
+                    ? creditorBICInput.value.trim().toUpperCase()
+                    : deriveBIC(info.creditorIBAN);
+                info.creditorId = creditorIdInput.value.trim().toUpperCase();
                 info.sequenceType = sequenceTypeSelect.value;             // FRST/RCUR/OOFF/FNAL
                 info.localInstrumentation = localInstrumentationSelect.value;  // CORE/COR1/B2B
 
@@ -1025,10 +1128,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
                     transaction.debtorName = t.name;                       // Schuldner-Name
-                    transaction.debtorIBAN = t.iban;                       // Schuldner-IBAN
-                    transaction.debtorBIC = t.bic || '';                   // Schuldner-BIC (optional)
+                    transaction.debtorIBAN = String(t.iban || '').toUpperCase();  // Schuldner-IBAN (uppercase fuer Bank-Konformitaet)
+                    // BIC aus Excel oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
+                    transaction.debtorBIC = String(t.bic || '').toUpperCase() || deriveBIC(transaction.debtorIBAN);
                     transaction.amount = parseFloat(t.amount);             // Betrag in EUR
-                    transaction.mandateId = t.mandateId;                   // Mandatsreferenz
+                    transaction.mandateId = String(t.mandateId || '');     // Mandatsreferenz (String-Cast: schützt vor numerischen Excel-Werten)
+                    // Ende-zu-Ende-Referenz: mandateId weiterverwenden mit Fallback.
+                    // Ohne diese Zeile bleibt end2endId "" (Lib-Default) und das XML
+                    // enthaelt <EndToEndId></EndToEndId> – Banken lehnen den leeren
+                    // Wert ab ("Datei enthaelt folgenden invaliden Wert: ").
+                    transaction.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
 
                     // Mandats-Unterschriftsdatum: Aus Eingabe oder Fallback auf heute
                     const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
@@ -1041,19 +1150,24 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 // --- Ueberweisungs-Konfiguration ---
                 info.debtorName = debtorNameInput.value;
-                info.debtorIBAN = debtorIBANInput.value.replace(/\s/g, '');
-                if (debtorBICInput.value) info.debtorBIC = debtorBICInput.value;
+                info.debtorIBAN = debtorIBANInput.value.replace(/\s/g, '').toUpperCase();
+                // BIC aus Eingabe oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
+                info.debtorBIC = debtorBICInput.value
+                    ? debtorBICInput.value.trim().toUpperCase()
+                    : deriveBIC(info.debtorIBAN);
 
                 // === Schritt 5b: Ueberweisungs-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
                     transaction.creditorName = t.name;                     // Empfaenger-Name
-                    transaction.creditorIBAN = t.iban;                     // Empfaenger-IBAN
-                    transaction.creditorBIC = t.bic || '';                 // Empfaenger-BIC (optional)
+                    transaction.creditorIBAN = String(t.iban || '').toUpperCase();  // Empfaenger-IBAN (uppercase)
+                    // BIC aus Excel oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
+                    transaction.creditorBIC = String(t.bic || '').toUpperCase() || deriveBIC(transaction.creditorIBAN);
                     transaction.amount = parseFloat(t.amount);             // Betrag in EUR
                     transaction.remittanceInfo = t.remittanceInfo;          // Verwendungszweck
                     // Ende-zu-Ende-Referenz: Nutzer-Referenz oder Fallback "NOTPROVIDED"
-                    transaction.end2endId = t.mandateId || 'NOTPROVIDED';
+                    // String-Cast schützt vor numerischen Excel-Werten (sonst crasht .match() in der Lib).
+                    transaction.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
 
                     info.addTransaction(transaction);
                 });
@@ -1065,7 +1179,14 @@ document.addEventListener('DOMContentLoaded', function() {
             doc.addPaymentInfo(info);
 
             // === Schritt 7: XML-String generieren ===
-            const xml = doc.toString();
+            // Hinweis: doc.toString() liest xmlVersion/xmlEncoding vom DOM-Document.
+            // Im Browser sind diese Properties read-only und ergeben encoding="null"
+            // im Header (in Node.js / @xmldom funktioniert das Setzen, deshalb fangen
+            // unsere Tests den Bug nicht). Banking-Software (z.B. die der HypoVereinsbank)
+            // lehnt encoding="null" mit "Dateiformat nicht unterstützt" ab.
+            // Wir ersetzen den XML-Header deterministisch durch UTF-8.
+            let xml = doc.toString();
+            xml = xml.replace(/^<\?xml[^?]*\?>/, '<?xml version="1.0" encoding="UTF-8"?>');
 
             // === Schritt 8: Download ausloesen ===
             const blob = new Blob([xml], { type: 'application/xml' });
@@ -1075,7 +1196,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Dateiname: YYYY-MM-DD_SEPA_Lastschrift.xml bzw. _Überweisung.xml
             const date = new Date().toISOString().split('T')[0];
-            const type = currentPaymentType === 'directDebit' ? 'Lastschrift' : 'Überweisung';
+            const type = isDirectDebit ? 'Lastschrift' : 'Überweisung';
             a.download = `${date}_SEPA_${type}.xml`;
 
             // Unsichtbaren Link erstellen, klicken und aufraeuamen
@@ -1343,6 +1464,33 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     function generateMessageId() {
         return 'MSG-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    }
+
+    /**
+     * Leitet den BIC aus einer deutschen IBAN ab (Bankleitzahl = Stellen 5-12).
+     *
+     * Hintergrund: Seit 2016 ist der BIC im SEPA-Raum optional. Ohne BIC erzeugt
+     * die Lib <FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId>. Manche
+     * (aeltere) Bankprogramme validieren aber gegen ein Schema, dessen
+     * <FinInstnId> nur <BIC> erlaubt, und lehnen dann jedes <Othr> ab
+     * ("no declaration found for element 'Othr'"). Damit Nutzer keinen BIC
+     * eintippen muessen, ermitteln wir ihn aus der IBAN.
+     *
+     * Die Zuordnung stammt aus der offiziellen Bankleitzahlendatei der Deutschen
+     * Bundesbank (blz-bic.js, per <script> geladen). Fehlt die Tabelle oder ist
+     * die BLZ unbekannt/die IBAN nicht deutsch, wird '' zurueckgegeben – dann
+     * bleibt es beim NOTPROVIDED-Fallback der Lib (schadet SEPA-konformen Banken
+     * nicht).
+     *
+     * @param {string} iban - IBAN (mit oder ohne Leerzeichen)
+     * @returns {string} Abgeleiteter BIC (8 oder 11 Zeichen) oder ''
+     */
+    function deriveBIC(iban) {
+        const clean = String(iban || '').replace(/\s/g, '').toUpperCase();
+        // Nur deutsche IBANs (DE + 2 Pruefziffern + 8 BLZ + 10 Konto = 22 Zeichen)
+        if (!/^DE\d{20}$/.test(clean)) return '';
+        const table = (typeof window !== 'undefined' && window.SEPA_BLZ_BIC) || {};
+        return table[clean.substr(4, 8)] || '';
     }
 
     /**
