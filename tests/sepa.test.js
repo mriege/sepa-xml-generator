@@ -3,6 +3,19 @@ const assert = require('node:assert');
 const SEPA = require('../sepa.min.js');
 const BLZ_BIC = require('../blz-bic.js');   // Offizielle BLZ->BIC Tabelle (Bundesbank)
 
+// Spiegelt sepaText() aus sepa-generator.js: wandelt Freitext in den
+// SEPA-Zeichensatz um und kuerzt NUR, wenn erst die Umwandlung das Feld
+// ueberlaufen laesst. War die Eingabe schon zu lang, bleibt sie zu lang, damit
+// die Laengenpruefung der Library anschlaegt statt still abzuschneiden.
+function sepaText(value, maxLen) {
+  const original = (value === null || value === undefined ? '' : String(value)).trim();
+  const converted = SEPA.toSepaText(original);
+  if (original.length <= maxLen && converted.length > maxLen) {
+    return SEPA.toSepaText(original, maxLen);
+  }
+  return converted;
+}
+
 // Spiegelt deriveBIC() aus sepa-generator.js: leitet den BIC aus einer
 // deutschen IBAN ab (BLZ = Stellen 5-12), sonst '' (NOTPROVIDED-Fallback greift).
 function deriveBIC(iban) {
@@ -816,6 +829,10 @@ function excelToXML(rows, paymentType, painFormat) {
   doc.grpHdr.initiatorName = 'Excel Test Initiator';
 
   const info = doc.createPaymentInfo();
+  // Wie im Generator VOR den Transaktionen: addPaymentInfo setzt info.id, aus
+  // der addTransaction die InstrId ableitet. Andernfalls hiesse jede InstrId
+  // nur ".0", ".1", ...
+  doc.addPaymentInfo(info);
 
   if (paymentType === 'directDebit') {
     info.collectionDate = new Date('2026-02-01');
@@ -828,16 +845,16 @@ function excelToXML(rows, paymentType, painFormat) {
 
     for (const t of transactions) {
       const txn = info.createTransaction();
-      txn.debtorName = t.name;
+      txn.debtorName = sepaText(t.name, 70);
       txn.debtorIBAN = String(t.iban || '').toUpperCase();
       txn.debtorBIC = String(t.bic || '').toUpperCase() || deriveBIC(txn.debtorIBAN);
       txn.amount = parseFloat(t.amount);
-      txn.mandateId = String(t.mandateId || '');
+      txn.mandateId = sepaText(t.mandateId, 35);
       // end2endId muss auch bei DD gesetzt werden, sonst <EndToEndId/> leer.
-      txn.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
+      txn.end2endId = sepaText(t.mandateId, 35) || 'NOTPROVIDED';
       const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
       txn.mandateSignatureDate = isNaN(d.getTime()) ? new Date() : d;
-      txn.remittanceInfo = t.remittanceInfo;
+      txn.remittanceInfo = sepaText(t.remittanceInfo, 140);
       info.addTransaction(txn);
     }
   } else {
@@ -848,17 +865,16 @@ function excelToXML(rows, paymentType, painFormat) {
 
     for (const t of transactions) {
       const txn = info.createTransaction();
-      txn.creditorName = t.name;
+      txn.creditorName = sepaText(t.name, 70);
       txn.creditorIBAN = String(t.iban || '').toUpperCase();
       txn.creditorBIC = String(t.bic || '').toUpperCase() || deriveBIC(txn.creditorIBAN);
       txn.amount = parseFloat(t.amount);
-      txn.remittanceInfo = t.remittanceInfo;
-      txn.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
+      txn.remittanceInfo = sepaText(t.remittanceInfo, 140);
+      txn.end2endId = sepaText(t.mandateId, 35) || 'NOTPROVIDED';
       info.addTransaction(txn);
     }
   }
 
-  doc.addPaymentInfo(info);
   // Spiegelt den Header-Replace aus generateAndDownload() wider: Im Browser
   // liefert die Lib encoding="null", weil document.xmlEncoding read-only ist.
   // In Node.js ist der Replace ein No-Op, aber der Codepfad bleibt symmetrisch.
@@ -1049,7 +1065,8 @@ describe('Excel-Import: Datenverarbeitung', () => {
       Referenz: 'REF-001',
     }];
     const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
-    assert.ok(xml.includes('<BIC>BYLADEM1001</BIC>'), 'BIC sollte aus der BLZ abgeleitet werden');
+    // pain.001.001.09 nutzt die 2019er-Basistypen: das Element heisst <BICFI>.
+    assert.ok(xml.includes('<BICFI>BYLADEM1001</BICFI>'), 'BIC sollte aus der BLZ abgeleitet werden');
     assert.ok(!xml.includes('NOTPROVIDED'), 'Kein NOTPROVIDED-Fallback bei bekannter deutscher BLZ');
   });
 
@@ -1642,5 +1659,344 @@ describe('BLZ->BIC-Ableitung (Bank-Kompatibilität)', () => {
     const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
     assertValidXML(xml, 'pain.001.001.09');
     assert.ok(xml.includes('<Othr><Id>NOTPROVIDED</Id></Othr>'), 'Foreign-IBAN muss NOTPROVIDED behalten');
+  });
+});
+
+// -------------------------------------------------------------------------
+// 14. Schema-Validierung gegen die echten XSDs
+// -------------------------------------------------------------------------
+//
+// Die uebrigen Suiten pruefen, ob bestimmte Zeichenketten im XML vorkommen.
+// Das reicht nicht: drei schema-brechende Fehler (<BIC> statt <BICFI> in den
+// .08/.09-Formaten, flaches <ReqdExctnDt> statt <ReqdExctnDt><Dt>, fehlendes
+// NbOfTxs im PmtInf) sind so unentdeckt in Produktion gelangt und erst durch
+// Nutzer-Rueckmeldungen aufgefallen. Diese Suite validiert jedes erzeugte
+// Dokument gegen das echte ISO-Schema.
+//
+// Die XSDs liegen in tests/xsd/ (per tools/fetch-xsd.mjs aktualisierbar).
+
+const { execFileSync } = require('node:child_process');
+const { writeFileSync, mkdtempSync } = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const XSD_DIR = path.join(__dirname, 'xsd');
+
+// xmllint liegt auf macOS und den meisten Linux-Distributionen bei. Fehlt es,
+// wird die Suite uebersprungen statt rot zu laufen – aber sichtbar, damit
+// niemand ein gruenes Testergebnis fuer eine echte Schema-Pruefung haelt.
+const HAS_XMLLINT = (() => {
+  try {
+    execFileSync('xmllint', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+const SKIP_XSD = HAS_XMLLINT
+  ? false
+  : 'xmllint nicht gefunden – Schema-Validierung uebersprungen (macOS: vorinstalliert, Debian/Ubuntu: apt-get install libxml2-utils)';
+
+// Formate, fuer die ein XSD vorliegt. pain.001.001.08 fehlt: die Bezugsquelle
+// bietet es nicht an. Es wird weiter unten strukturell geprueft.
+const XSD_FORMATS = [
+  'pain.001.001.03',
+  'pain.001.001.09',
+  'pain.008.001.02',
+  'pain.008.001.08',
+];
+
+const xsdTmpDir = mkdtempSync(path.join(os.tmpdir(), 'sepa-xsd-'));
+let xsdFileCounter = 0;
+
+/**
+ * Validiert einen XML-String gegen das XSD seines pain-Formats.
+ * Schlaegt mit der vollstaendigen xmllint-Ausgabe fehl, damit die Fehlerzeile
+ * direkt lesbar ist statt nur "fails to validate".
+ */
+function assertSchemaValid(xml, painFormat) {
+  const xmlPath = path.join(xsdTmpDir, `${painFormat}-${xsdFileCounter++}.xml`);
+  writeFileSync(xmlPath, xml);
+  try {
+    execFileSync(
+      'xmllint',
+      ['--noout', '--schema', path.join(XSD_DIR, `${painFormat}.xsd`), xmlPath],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+  } catch (e) {
+    const details = (e.stderr ? e.stderr.toString() : '') || e.message;
+    assert.fail(`${painFormat} verletzt das Schema:\n${details}`);
+  }
+}
+
+describe('Schema-Validierung (XSD)', { skip: SKIP_XSD }, () => {
+
+  for (const fmt of XSD_FORMATS) {
+    const isDD = fmt.startsWith('pain.008');
+
+    it(`${fmt}: Standardfall validiert`, () => {
+      const doc = isDD ? createDirectDebitDoc(fmt) : createTransferDoc(fmt);
+      assertSchemaValid(doc.toString(), fmt);
+    });
+
+    it(`${fmt}: mehrere Transaktionen validieren`, () => {
+      const doc = isDD
+        ? createDirectDebitDoc(fmt, { transactions: TEST_DATA.accounts })
+        : createTransferDoc(fmt, { transactions: TEST_DATA.accounts });
+      assertSchemaValid(doc.toString(), fmt);
+    });
+
+    it(`${fmt}: ohne BIC (Othr/NOTPROVIDED) validiert`, () => {
+      // Der NOTPROVIDED-Fallback muss in BEIDEN Basistyp-Generationen passen:
+      // <Othr><Id> liegt in FinancialInstitutionIdentification7 wie in 18.
+      const noBic = [{ name: 'Clara Fischer', iban: 'DE02120300000000202051', bic: '' }];
+      const doc = isDD
+        ? createDirectDebitDoc(fmt, { transactions: noBic })
+        : createTransferDoc(fmt, { transactions: noBic });
+      if (isDD) { doc._paymentInfo[0].creditorBIC = ''; }
+      else      { doc._paymentInfo[0].debtorBIC = ''; }
+      assertSchemaValid(doc.toString(), fmt);
+    });
+
+    it(`${fmt}: mit Postanschrift validiert`, () => {
+      // PstlAdr wechselt zwischen PostalAddress6 und PostalAddress24 – die
+      // Reihenfolge Ctry vor AdrLine muss in beiden stimmen.
+      const doc = isDD ? createDirectDebitDoc(fmt) : createTransferDoc(fmt);
+      const info = doc._paymentInfo[0];
+      const party = isDD ? 'creditor' : 'debtor';
+      info[`${party}Street`] = 'Hauptstrasse 1';
+      info[`${party}City`] = 'Berlin';
+      info[`${party}Country`] = 'DE';
+      assertSchemaValid(doc.toString(), fmt);
+    });
+
+    it(`${fmt}: Excel-Pipeline validiert`, () => {
+      const xml = isDD
+        ? excelToXML(TEMPLATE_ROWS_DD, 'directDebit', fmt)
+        : excelToXML(TEMPLATE_ROWS_CT, 'transfer', fmt);
+      assertSchemaValid(xml, fmt);
+    });
+
+    it(`${fmt}: Excel-Pipeline mit Umlauten validiert`, () => {
+      const rows = isDD
+        ? [{ Name: 'Jörg Grün-Weiß', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX', Betrag: 12.34, Verwendungszweck: 'Beitrag für Straßenfest & Grünanlage', Mandatsreferenz: 'MAND-Ä-1', Mandatsdatum: '2025-06-15' }]
+        : [{ Name: 'Jörg Grün-Weiß', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX', Betrag: 12.34, Verwendungszweck: 'Rechnung für Straßenfest & Grünanlage', Referenz: 'REF-Ä-1' }];
+      const xml = excelToXML(rows, isDD ? 'directDebit' : 'transfer', fmt);
+      assert.ok(!/[^\x00-\x7F]/.test(xml), 'XML darf nach der Umwandlung keine Nicht-ASCII-Zeichen mehr enthalten');
+      assertSchemaValid(xml, fmt);
+    });
+  }
+});
+
+// -------------------------------------------------------------------------
+// 15. BIC vs. BICFI (formatabhaengiger Elementname)
+// -------------------------------------------------------------------------
+//
+// Gemeldet von einem Nutzer: pain.008.001.08 wurde abgelehnt, weil die Lib
+// <BIC> schrieb. Die 2019er-Basistypen (FinancialInstitutionIdentification18)
+// erwarten <BICFI>. Ein globales Ersetzen waere falsch – die weiterhin
+// verbreiteten Formate .02/.03 brauchen unveraendert <BIC>.
+
+describe('BIC vs. BICFI', () => {
+
+  it('bicTagName liefert BIC fuer die alten Basistypen', () => {
+    assert.strictEqual(SEPA.bicTagName('pain.001.001.03'), 'BIC');
+    assert.strictEqual(SEPA.bicTagName('pain.008.001.02'), 'BIC');
+  });
+
+  it('bicTagName liefert BICFI ab .08 – in beiden Nachrichtenfamilien', () => {
+    assert.strictEqual(SEPA.bicTagName('pain.001.001.08'), 'BICFI');
+    assert.strictEqual(SEPA.bicTagName('pain.001.001.09'), 'BICFI');
+    assert.strictEqual(SEPA.bicTagName('pain.008.001.08'), 'BICFI');
+  });
+
+  for (const fmt of ['pain.008.001.02', 'pain.001.001.03']) {
+    it(`${fmt} schreibt <BIC> und niemals <BICFI>`, () => {
+      const doc = fmt.startsWith('pain.008') ? createDirectDebitDoc(fmt) : createTransferDoc(fmt);
+      const xml = doc.toString();
+      assert.ok(xml.includes('<BIC>COBADEFFXXX</BIC>'), 'Erwartet <BIC> in den alten Basistypen');
+      assert.ok(!xml.includes('<BICFI>'), 'BICFI existiert in diesem Schema nicht');
+    });
+  }
+
+  for (const fmt of ['pain.008.001.08', 'pain.001.001.08', 'pain.001.001.09']) {
+    it(`${fmt} schreibt <BICFI> und niemals <BIC>`, () => {
+      const doc = fmt.startsWith('pain.008') ? createDirectDebitDoc(fmt) : createTransferDoc(fmt);
+      const xml = doc.toString();
+      assert.ok(xml.includes('<BICFI>COBADEFFXXX</BICFI>'), 'Erwartet <BICFI> in den 2019er-Basistypen');
+      assert.ok(!/<BIC>/.test(xml), 'BIC ist in diesem Schema nicht deklariert');
+    });
+  }
+
+  it('beide Parteien (PmtInf und Transaktion) verwenden denselben Tag', () => {
+    const xml = createDirectDebitDoc('pain.008.001.08').toString();
+    // Glaeubiger-Bank im PmtInf UND Schuldner-Bank in der Transaktion
+    assert.strictEqual((xml.match(/<BICFI>/g) || []).length, 2);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 16. ReqdExctnDt: ISODate vs. DateAndDateTime2Choice
+// -------------------------------------------------------------------------
+//
+// Ab pain.001.001.08 ist ReqdExctnDt keine ISODate mehr, sondern eine Choice.
+// Flach geschrieben lehnen Banken ab mit "Missing child element(s).
+// Expected is one of ( Dt, DtTm )". Bei der Lastschrift bleibt ReqdColltnDt
+// dagegen in allen Versionen eine flache ISODate.
+
+describe('ReqdExctnDt-Struktur', () => {
+
+  it('pain.001.001.03 schreibt das Datum flach', () => {
+    const xml = createTransferDoc('pain.001.001.03').toString();
+    assert.ok(xml.includes('<ReqdExctnDt>2026-02-01</ReqdExctnDt>'));
+  });
+
+  for (const fmt of ['pain.001.001.08', 'pain.001.001.09']) {
+    it(`${fmt} verschachtelt das Datum in <Dt>`, () => {
+      const xml = createTransferDoc(fmt).toString();
+      assert.ok(xml.includes('<ReqdExctnDt><Dt>2026-02-01</Dt></ReqdExctnDt>'),
+        'Erwartet <ReqdExctnDt><Dt>…</Dt></ReqdExctnDt>');
+    });
+  }
+
+  for (const fmt of DD_FORMATS) {
+    it(`${fmt}: ReqdColltnDt bleibt flach`, () => {
+      const xml = createDirectDebitDoc(fmt).toString();
+      assert.ok(xml.includes('<ReqdColltnDt>2026-02-01</ReqdColltnDt>'),
+        'ReqdColltnDt ist in allen Versionen eine ISODate');
+    });
+  }
+});
+
+// -------------------------------------------------------------------------
+// 17. SEPA-Zeichensatz (EPC217-08)
+// -------------------------------------------------------------------------
+//
+// Gemeldet von einem Nutzer: Banken lehnen Umlaute ab, obwohl die Datei
+// UTF-8-kodiert ist. Der EPC-Zeichenvorrat kennt nur
+// a-z A-Z 0-9 Leerzeichen und / - ? : ( ) . , ' +
+
+describe('SEPA-Zeichensatz (toSepaText)', () => {
+
+  it('loest deutsche Umlaute nach Konvention auf', () => {
+    assert.strictEqual(SEPA.toSepaText('Jörg Grün'), 'Joerg Gruen');
+    assert.strictEqual(SEPA.toSepaText('Müller Straße'), 'Mueller Strasse');
+    assert.strictEqual(SEPA.toSepaText('ÄÖÜ äöü ß'), 'AeOeUe aeoeue ss');
+  });
+
+  it('reduziert Umlaute NICHT auf den Grundbuchstaben', () => {
+    // Die NFD-Zerlegung darf erst NACH der Ersetzungstabelle laufen, sonst
+    // wuerde "ä" zu "a" statt zu "ae".
+    assert.ok(!SEPA.toSepaText('Müller').includes('Muller'));
+  });
+
+  it('entfernt Akzente anderer Sprachen', () => {
+    assert.strictEqual(SEPA.toSepaText('José Ñuñez'), 'Jose Nunez');
+    assert.strictEqual(SEPA.toSepaText('Çelik Ağa'), 'Celik Aga');
+    assert.strictEqual(SEPA.toSepaText('Łukasz Þór'), 'Lukasz Thor');
+  });
+
+  it('ersetzt Sonderzeichen sinnvoll statt sie zu loeschen', () => {
+    assert.strictEqual(SEPA.toSepaText('Müller & Söhne'), 'Mueller + Soehne');
+    assert.strictEqual(SEPA.toSepaText('Betrag 100€'), 'Betrag 100EUR');
+    assert.strictEqual(SEPA.toSepaText('„Zitat“ – Ende…'), "'Zitat' - Ende...");
+  });
+
+  it('behaelt den erlaubten Zeichenvorrat unveraendert', () => {
+    const allowed = "ABCabc012 /-?:().,'+";
+    assert.strictEqual(SEPA.toSepaText(allowed), allowed);
+  });
+
+  it('normalisiert Whitespace (auch Zeilenumbrueche)', () => {
+    assert.strictEqual(SEPA.toSepaText('  Max\n\tMustermann  '), 'Max Mustermann');
+  });
+
+  it('ist robust gegen null, undefined und Zahlen aus Excel', () => {
+    assert.strictEqual(SEPA.toSepaText(null), '');
+    assert.strictEqual(SEPA.toSepaText(undefined), '');
+    assert.strictEqual(SEPA.toSepaText(''), '');
+    assert.strictEqual(SEPA.toSepaText(12345), '12345');
+  });
+
+  it('kuerzt erst NACH der Umwandlung auf die Feldlaenge', () => {
+    // 40x "ß" ergibt 80 Zeichen "s" – wuerde man vor der Umwandlung kuerzen,
+    // waere das Ergebnis wieder zu lang.
+    const out = SEPA.toSepaText('ß'.repeat(40), 70);
+    assert.strictEqual(out.length, 70);
+    assert.strictEqual(out, 's'.repeat(70));
+  });
+
+  it('laesst beim Kuerzen kein Leerzeichen am Ende stehen', () => {
+    assert.strictEqual(SEPA.toSepaText('abcde fghij', 6), 'abcde');
+  });
+
+  it('ohne Laengenangabe wird nicht gekuerzt', () => {
+    assert.strictEqual(SEPA.toSepaText('A'.repeat(200)).length, 200);
+  });
+});
+
+describe('SEPA-Zeichensatz: Wirkung im XML', () => {
+
+  it('Umlaute erscheinen umgewandelt im XML', () => {
+    const rows = [{
+      Name: 'Jörg Grün', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 12.34, Verwendungszweck: 'Beitrag für Straßenfest', Referenz: 'REF-1',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    assert.ok(xml.includes('<Nm>Joerg Gruen</Nm>'));
+    assert.ok(xml.includes('<Ustrd>Beitrag fuer Strassenfest</Ustrd>'));
+    assert.ok(!xml.includes('ö') && !xml.includes('ü') && !xml.includes('ß'));
+  });
+
+  it('zu langer Verwendungszweck wirft weiterhin einen Fehler (kein stilles Kuerzen)', () => {
+    // Wichtig: die Umwandlung darf die bestehende Laengenpruefung nicht
+    // aushebeln – sonst verschwaende Text spurlos in der Bankdatei.
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'A'.repeat(141), Referenz: 'REF',
+    }];
+    assert.throws(() => excelToXML(rows, 'transfer', 'pain.001.001.09'), /remittanceInfo/);
+  });
+
+  it('ein durch die Umwandlung verlaengerter Verwendungszweck wird gekuerzt statt abgelehnt', () => {
+    // 140 Zeichen Eingabe, die durch "ß" -> "ss" auf 210 waechst: Der Nutzer
+    // hat die Feldgrenze eingehalten, also darf hier kein Fehler entstehen.
+    const rows = [{
+      Name: 'Test Person', IBAN: 'DE89370400440532013000', BIC: 'COBADEFFXXX',
+      Betrag: 100, Verwendungszweck: 'ß'.repeat(70) + 'A'.repeat(70), Referenz: 'REF',
+    }];
+    const xml = excelToXML(rows, 'transfer', 'pain.001.001.09');
+    const ustrd = xml.match(/<Ustrd>([^<]*)<\/Ustrd>/)[1];
+    assert.strictEqual(ustrd.length, 140);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 18. InstrId-Praefix und CreDtTm-Format
+// -------------------------------------------------------------------------
+
+describe('InstrId und CreDtTm', () => {
+
+  it('InstrId wird mit der PmtInfId praefixt (nicht ".0")', () => {
+    // addTransaction leitet die InstrId aus info.id ab. Wurde addPaymentInfo
+    // erst nach den Transaktionen aufgerufen, war info.id noch leer und jede
+    // InstrId hiess nur ".0", ".1", ...
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.09');
+    assert.ok(!xml.includes('<InstrId>.'), 'InstrId darf nicht mit einem Punkt beginnen');
+    assert.ok(xml.includes('<InstrId>MSG-EXCEL-TEST.0.0</InstrId>'));
+    assert.ok(xml.includes('<InstrId>MSG-EXCEL-TEST.0.1</InstrId>'));
+  });
+
+  it('InstrId bleibt innerhalb von 35 Zeichen', () => {
+    const xml = excelToXML(TEMPLATE_ROWS_CT, 'transfer', 'pain.001.001.09');
+    for (const m of xml.matchAll(/<InstrId>([^<]*)<\/InstrId>/g)) {
+      assert.ok(m[1].length <= 35, `InstrId zu lang: "${m[1]}" (${m[1].length})`);
+    }
+  });
+
+  it('CreDtTm wird ohne Millisekunden geschrieben', () => {
+    const xml = createTransferDoc('pain.001.001.09').toString();
+    assert.ok(xml.includes('<CreDtTm>2026-01-15T10:00:00Z</CreDtTm>'),
+      'Erwartet YYYY-MM-DDThh:mm:ssZ ohne Sekundenbruchteile');
   });
 });

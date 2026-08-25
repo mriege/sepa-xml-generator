@@ -150,6 +150,34 @@ Blob → Download
 - **Mandatsreferenz**: Max. 35 Zeichen, SEPA-Zeichensatz
 - **BIC/IBAN-Land**: Laendercode-Abgleich
 
+### SEPA-Zeichensatz (EPC217-08)
+Freitextfelder (Namen, Verwendungszweck, Referenzen) werden vor der XML-Erzeugung
+automatisch in den EPC-Zeichenvorrat umgewandelt:
+
+    a-z A-Z 0-9 Leerzeichen und / - ? : ( ) . , ' +
+
+Umlaute werden nach deutscher Konvention aufgeloest (ae/oe/ue/ss), Akzente anderer
+Sprachen auf den Grundbuchstaben reduziert (é -> e), und Sonderzeichen sinnvoll
+ersetzt (& -> +, EUR-Zeichen -> EUR). Hintergrund: Viele Bankprogramme akzeptieren
+nur diesen Zeichenvorrat und lehnen Umlaute ab oder ersetzen sie still durch
+Fragezeichen -- auch wenn die Datei korrekt UTF-8-kodiert ist.
+
+Nicht umgewandelt werden IBAN, BIC, Glaeubiger-ID und Datumsfelder: die sind
+bereits auf A-Z/0-9 beschraenkt und wuerden durch eine Umwandlung nur riskieren,
+ihre Pruefziffer zu verlieren.
+
+### Formatabhaengige Schema-Unterschiede
+Die pain-Formate ab `.08` setzen auf den ISO-20022-Basistypen von 2019 auf und
+unterscheiden sich in zwei Elementen von `.02`/`.03`:
+
+| | pain.008.001.02 / pain.001.001.03 | pain.008.001.08 / pain.001.001.08 / .09 |
+|---|---|---|
+| BIC in `<FinInstnId>` | `<BIC>` | `<BICFI>` |
+| `<ReqdExctnDt>` (nur pain.001) | flache ISODate | `<ReqdExctnDt><Dt>...</Dt></ReqdExctnDt>` |
+
+Ein pauschales Ersetzen von `BIC` durch `BICFI` waere deshalb falsch -- es wuerde
+die weiterhin verbreiteten Formate `.02`/`.03` ungueltig machen.
+
 ### Browser-APIs
 - `localStorage` - Persistente Konfigurationsspeicherung
 - `File API` - Excel-Datei-Upload
@@ -171,18 +199,41 @@ npm install
 npm test
 ```
 
-### Testabdeckung (83 Tests)
-| Suite | Tests | Beschreibung |
-|---|---|---|
-| Lastschrift x Formate | 24 | Alle pain.008-Formate mit verschiedenen Optionen |
-| Ueberweisung x Formate | 18 | Alle pain.001-Formate mit verschiedenen Optionen |
-| Sequenztyp x Instrumentierung | 12 | 4x3 Matrix (FRST/RCUR/OOFF/FNAL x CORE/COR1/B2B) |
-| IBAN-Validierung | 8 | Gueltige + ungueltige IBANs |
-| Glaeubiger-ID-Validierung | 2 | Gueltige + ungueltige IDs |
-| Fehlerfaelle & Grenzwerte | 11 | Betraege, BIC, Mandate, Zeichenlaengen |
-| Dokumentstruktur | 2 | addPaymentInfo-Verhalten |
-| Typbehandlung | 2 | Date vs. String fuer grpHdr.created |
-| Integration | 4 | Vollstaendige Ablauf-Simulationen |
+### Testabdeckung (199 Tests)
+| Suite | Beschreibung |
+|---|---|
+| Lastschrift x Formate | Alle pain.008-Formate mit verschiedenen Optionen |
+| Ueberweisung x Formate | Alle pain.001-Formate mit verschiedenen Optionen |
+| Sequenztyp x Instrumentierung | 4x3 Matrix (FRST/RCUR/OOFF/FNAL x CORE/COR1/B2B) |
+| IBAN-Validierung | Gueltige + ungueltige IBANs |
+| Glaeubiger-ID-Validierung | Gueltige + ungueltige IDs |
+| Fehlerfaelle & Grenzwerte | Betraege, BIC, Mandate, Zeichenlaengen |
+| Dokumentstruktur | addPaymentInfo-Verhalten |
+| Typbehandlung | Date vs. String fuer grpHdr.created |
+| Integration | Vollstaendige Ablauf-Simulationen |
+| Excel-Import | Spalten-Mapping, Datenverarbeitung, End-to-End |
+| BLZ->BIC-Ableitung | Bundesbank-Tabelle, Fallbacks |
+| **Schema-Validierung (XSD)** | Jedes erzeugte Dokument gegen das echte ISO-Schema |
+| BIC vs. BICFI | Formatabhaengiger Elementname |
+| ReqdExctnDt-Struktur | ISODate vs. DateAndDateTime2Choice |
+| SEPA-Zeichensatz | Umwandlung und Wirkung im XML |
+
+### Schema-Validierung
+Die Zeichenketten-Pruefungen der uebrigen Suiten reichen nicht aus: drei
+schema-brechende Fehler sind so unentdeckt in Produktion gelangt und erst durch
+Nutzer-Rueckmeldungen aufgefallen. Seither wird jedes erzeugte Dokument mit
+`xmllint` gegen das echte ISO-Schema validiert.
+
+Die XSDs liegen eingecheckt in `tests/xsd/`, damit die Tests ohne Netzzugriff
+laufen. Aktualisieren:
+
+```bash
+node tools/fetch-xsd.mjs
+```
+
+`xmllint` ist auf macOS vorinstalliert; unter Debian/Ubuntu liefert es
+`apt-get install libxml2-utils`. Fehlt es, wird die Suite sichtbar uebersprungen
+statt fehlzuschlagen.
 
 ## Kompatibilitaet
 

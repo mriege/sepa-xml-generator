@@ -409,10 +409,11 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {string} type - 'directDebit' oder 'transfer'
      */
     function updatePainFormatOptions(type) {
-        // Default auf .02/.03: Diese Versionen enthalten NbOfTxs/CtrlSum im PmtInf-Block
-        // wie es die deutsche Kreditwirtschaft (DK) verlangt. Neuere Versionen (.08/.09)
-        // werden von manchen Banken (z.B. Hannoversche Volksbank) abgelehnt mit
-        // "PmtTpInf wird an dieser Stelle nicht erwartet, NbOfTxs erwartet".
+        // Default weiterhin auf .02/.03: Alle angebotenen Formate erzeugen
+        // inzwischen schema-valides XML (per XSD in tests/xsd/ abgesichert),
+        // aber die Bank-SEITE unterstuetzt .08/.09 noch nicht flaechendeckend –
+        // die Umstellung der deutschen Kreditwirtschaft laeuft. .02/.03 wird
+        // dagegen ueberall akzeptiert und bleibt deshalb die sichere Vorauswahl.
         const options = type === 'directDebit' ? [
             { value: 'pain.008.001.02', text: 'pain.008.001.02 (Bank-kompatibel - EMPFOHLEN) ⭐', selected: true },
             { value: 'pain.008.001.08', text: 'pain.008.001.08 (Neueres ISO-Schema - nicht alle Banken)' }
@@ -1065,6 +1066,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 showError(`Mandatsreferenz fehlt für Transaktion ${missingMandate + 1} (${currentTransactions[missingMandate].name || 'ohne Namen'}). Bei Lastschriften ist die Mandatsreferenz Pflicht – bitte Excel-Spalte "Mandatsreferenz" befüllen.`);
                 return;
             }
+            // Mandatsreferenz darf 35 Zeichen nicht überschreiten (Max35Text).
+            // Die Library prüft die Länge hier NICHT – ohne diesen Guard entstünde
+            // eine XML, die erst die Bank mit einer kryptischen Schema-Meldung
+            // ablehnt. Gemessen wird nach der Zeichensatz-Umwandlung, weil
+            // "ß" → "ss" die Referenz verlängern kann.
+            const longMandate = currentTransactions.findIndex(
+                t => SEPA.toSepaText(t.mandateId).length > 35
+            );
+            if (longMandate !== -1) {
+                showError(`Die Mandatsreferenz für Transaktion ${longMandate + 1} (${currentTransactions[longMandate].name || 'ohne Namen'}) ist zu lang: maximal 35 Zeichen sind erlaubt. Bitte in der Excel-Spalte „Mandatsreferenz" kürzen.`);
+                return;
+            }
             // Mandatsdatum (Unterschriftsdatum) darf nicht NACH dem Fälligkeits-/
             // Einzugsdatum liegen: ein Mandat muss vor dem Einzug unterschrieben
             // sein. Sonst lehnt die Bank die Datei ab mit "ungültiger Wert beim
@@ -1092,16 +1105,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         try {
+            // Protokoll der Zeichensatz-Umwandlungen fuer diesen Lauf zuruecksetzen
+            sepaTextChanges = [];
+
             // === Schritt 2: SEPA-Dokument erstellen ===
             const doc = new SEPA.Document(painFormat);
 
             // === Schritt 3: GroupHeader konfigurieren ===
             doc.grpHdr.id = generateMessageId();       // Eindeutige Nachrichten-ID
             doc.grpHdr.created = new Date();            // Erstellungszeitpunkt (muss Date-Objekt sein!)
-            doc.grpHdr.initiatorName = initiatorNameInput.value;
+            doc.grpHdr.initiatorName = sepaText(initiatorNameInput.value, 70);
 
             // === Schritt 4: PaymentInfo erstellen und konfigurieren ===
             const info = doc.createPaymentInfo();
+
+            // Bewusst HIER (und nicht erst am Ende): addPaymentInfo setzt die
+            // PmtInfId aus der MsgId zusammen, und addTransaction leitet daraus
+            // die InstrId ab. Erst nach den Transaktionen aufgerufen war info.id
+            // noch leer und jede InstrId hiess ".0", ".1", ...
+            doc.addPaymentInfo(info);
 
             // Ausfuehrungsdatum setzen. Wir setzen BEIDE Felder unabhängig vom
             // pain-Format, damit die Lib-Validierung robust ist – egal ob sie
@@ -1114,7 +1136,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (isDirectDebit) {
                 // --- Lastschrift-Konfiguration ---
-                info.creditorName = creditorNameInput.value;
+                info.creditorName = sepaText(creditorNameInput.value, 70);
                 info.creditorIBAN = creditorIBANInput.value.replace(/\s/g, '').toUpperCase();
                 // BIC aus Eingabe oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
                 info.creditorBIC = creditorBICInput.value
@@ -1127,29 +1149,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 // === Schritt 5a: Lastschrift-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
-                    transaction.debtorName = t.name;                       // Schuldner-Name
+                    transaction.debtorName = sepaText(t.name, 70);         // Schuldner-Name
                     transaction.debtorIBAN = String(t.iban || '').toUpperCase();  // Schuldner-IBAN (uppercase fuer Bank-Konformitaet)
                     // BIC aus Excel oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
                     transaction.debtorBIC = String(t.bic || '').toUpperCase() || deriveBIC(transaction.debtorIBAN);
                     transaction.amount = parseFloat(t.amount);             // Betrag in EUR
-                    transaction.mandateId = String(t.mandateId || '');     // Mandatsreferenz (String-Cast: schützt vor numerischen Excel-Werten)
+                    transaction.mandateId = sepaText(t.mandateId, 35);     // Mandatsreferenz
                     // Ende-zu-Ende-Referenz: mandateId weiterverwenden mit Fallback.
                     // Ohne diese Zeile bleibt end2endId "" (Lib-Default) und das XML
                     // enthaelt <EndToEndId></EndToEndId> – Banken lehnen den leeren
                     // Wert ab ("Datei enthaelt folgenden invaliden Wert: ").
-                    transaction.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
+                    transaction.end2endId = sepaText(t.mandateId, 35) || 'NOTPROVIDED';
 
                     // Mandats-Unterschriftsdatum: Aus Eingabe oder Fallback auf heute
                     const d = t.mandateSignatureDate ? new Date(t.mandateSignatureDate) : new Date();
                     transaction.mandateSignatureDate = isNaN(d.getTime()) ? new Date() : d;
 
-                    transaction.remittanceInfo = t.remittanceInfo;          // Verwendungszweck
+                    transaction.remittanceInfo = sepaText(t.remittanceInfo, 140);  // Verwendungszweck
 
                     info.addTransaction(transaction);
                 });
             } else {
                 // --- Ueberweisungs-Konfiguration ---
-                info.debtorName = debtorNameInput.value;
+                info.debtorName = sepaText(debtorNameInput.value, 70);
                 info.debtorIBAN = debtorIBANInput.value.replace(/\s/g, '').toUpperCase();
                 // BIC aus Eingabe oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
                 info.debtorBIC = debtorBICInput.value
@@ -1159,24 +1181,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 // === Schritt 5b: Ueberweisungs-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
                     const transaction = info.createTransaction();
-                    transaction.creditorName = t.name;                     // Empfaenger-Name
+                    transaction.creditorName = sepaText(t.name, 70);       // Empfaenger-Name
                     transaction.creditorIBAN = String(t.iban || '').toUpperCase();  // Empfaenger-IBAN (uppercase)
                     // BIC aus Excel oder – falls leer – aus der IBAN ableiten (siehe deriveBIC).
                     transaction.creditorBIC = String(t.bic || '').toUpperCase() || deriveBIC(transaction.creditorIBAN);
                     transaction.amount = parseFloat(t.amount);             // Betrag in EUR
-                    transaction.remittanceInfo = t.remittanceInfo;          // Verwendungszweck
+                    transaction.remittanceInfo = sepaText(t.remittanceInfo, 140);  // Verwendungszweck
                     // Ende-zu-Ende-Referenz: Nutzer-Referenz oder Fallback "NOTPROVIDED"
-                    // String-Cast schützt vor numerischen Excel-Werten (sonst crasht .match() in der Lib).
-                    transaction.end2endId = String(t.mandateId || '') || 'NOTPROVIDED';
+                    transaction.end2endId = sepaText(t.mandateId, 35) || 'NOTPROVIDED';
 
                     info.addTransaction(transaction);
                 });
             }
 
-            // === Schritt 6: PaymentInfo zum Dokument hinzufuegen ===
-            // WICHTIG: Ohne diesen Aufruf wuerde das XML-Dokument leer sein
-            // (keine Zahlungsdaten im <PmtInf>-Block)
-            doc.addPaymentInfo(info);
+            // === Schritt 6: (entfaellt – addPaymentInfo passiert oben, vor den
+            // Transaktionen, damit die InstrId korrekt praefixt wird) ===
 
             // === Schritt 7: XML-String generieren ===
             // Hinweis: doc.toString() liest xmlVersion/xmlEncoding vom DOM-Document.
@@ -1206,6 +1225,19 @@ document.addEventListener('DOMContentLoaded', function() {
             URL.revokeObjectURL(url);
 
             showSuccess('✓ SEPA-XML-Datei erfolgreich erstellt und heruntergeladen!');
+
+            // Wenn Text umgeschrieben wurde, den Nutzer darueber informieren –
+            // sonst wirkt "Mueller" statt "Müller" in der Datei wie ein Fehler.
+            if (sepaTextChanges.length) {
+                const examples = sepaTextChanges
+                    .slice(0, 3)
+                    .map(c => `„${c.from}" → „${c.to}"`)
+                    .join(', ');
+                const more = sepaTextChanges.length > 3
+                    ? ` (und ${sepaTextChanges.length - 3} weitere)`
+                    : '';
+                showSuccess(`ℹ️ Umlaute und Sonderzeichen wurden in den SEPA-Zeichensatz umgewandelt: ${examples}${more}. Das ist gewollt – viele Banken lehnen Umlaute ab.`, 'info');
+            }
 
         } catch (error) {
             showError(`Fehler beim Generieren der XML: ${error.message}`);
@@ -1426,30 +1458,41 @@ document.addEventListener('DOMContentLoaded', function() {
      *
      * @param {string} message - Erfolgsmeldungstext
      */
-    function showSuccess(message) {
+    function showSuccess(message, variant) {
+        const isInfo = variant === 'info';
+
+        // Bereits sichtbare Toasts nach unten ausweichen lassen, damit sich
+        // Erfolgs- und Hinweismeldung nicht ueberdecken.
+        const stacked = document.querySelectorAll('[data-toast]').length;
+
         const successDiv = document.createElement('div');
+        successDiv.setAttribute('data-toast', '');
         successDiv.style.cssText = `
             position: fixed;
-            top: 20px;
+            top: ${20 + stacked * 96}px;
             right: 20px;
-            background: linear-gradient(135deg, #10b981, #059669);
+            max-width: min(420px, calc(100vw - 40px));
+            background: ${isInfo
+                ? 'linear-gradient(135deg, #3b82f6, #2563eb)'
+                : 'linear-gradient(135deg, #10b981, #059669)'};
             color: white;
             padding: 1.5rem 2rem;
             border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4);
+            box-shadow: 0 8px 24px ${isInfo ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'};
             z-index: 10000;
             font-weight: 600;
             font-size: 1.05rem;
+            line-height: 1.4;
             animation: slideIn 0.3s ease;
         `;
         successDiv.textContent = message;
         document.body.appendChild(successDiv);
 
-        // Nach 3 Sekunden mit Slide-Out-Animation entfernen
+        // Hinweise stehen laenger, weil sie mehr Text zum Lesen enthalten.
         setTimeout(() => {
             successDiv.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => document.body.removeChild(successDiv), 300);
-        }, 3000);
+            setTimeout(() => successDiv.remove(), 300);
+        }, isInfo ? 9000 : 3000);
     }
 
     // ============================================================
@@ -1491,6 +1534,52 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!/^DE\d{20}$/.test(clean)) return '';
         const table = (typeof window !== 'undefined' && window.SEPA_BLZ_BIC) || {};
         return table[clean.substr(4, 8)] || '';
+    }
+
+    /**
+     * Sammelt waehrend einer Generierung alle Felder, die durch die
+     * Zeichensatz-Umwandlung veraendert wurden – damit der Nutzer nicht
+     * raetselt, warum in der XML ploetzlich "Mueller" statt "Müller" steht.
+     * Wird zu Beginn von generateAndDownload() geleert.
+     */
+    let sepaTextChanges = [];
+
+    /**
+     * Wandelt Freitext in den SEPA-Zeichensatz (EPC217-08) um und kuerzt ihn
+     * auf die Feldlaenge. Delegiert an SEPA.toSepaText() aus sepa.min.js, damit
+     * Browser und Tests dieselbe Implementierung verwenden.
+     *
+     * Hintergrund: Die XML ist zwar UTF-8-kodiert, viele Bankprogramme
+     * akzeptieren aber nur den EPC-Zeichenvorrat und lehnen Umlaute ab bzw.
+     * ersetzen sie still durch Fragezeichen. Umlaute werden deshalb nach
+     * deutscher Konvention aufgeloest (ä→ae, ö→oe, ü→ue, ß→ss).
+     *
+     * Bewusst NUR fuer Freitext (Namen, Verwendungszweck, Referenzen) –
+     * NICHT fuer IBAN, BIC, Glaeubiger-ID oder Datumsfelder: die sind bereits
+     * auf A-Z/0-9 beschraenkt und wuerden durch eine Umwandlung nur riskieren,
+     * ihre Pruefziffer zu verlieren.
+     *
+     * @param {*} value - Eingabewert (auch Zahlen aus Excel-Importen)
+     * @param {number} maxLen - Maximale Feldlaenge (70 Nm, 140 Ustrd, 35 IDs)
+     * @returns {string} Text im SEPA-Zeichensatz
+     */
+    function sepaText(value, maxLen) {
+        const original = (value === null || value === undefined ? '' : String(value)).trim();
+        let converted = SEPA.toSepaText(original);
+
+        // Nur kuerzen, wenn erst die Umwandlung das Feld ueberlaufen laesst
+        // ("ß" → "ss", "€" → "EUR" verlaengern den Text). War die Eingabe schon
+        // zu lang, bleibt sie zu lang – dann schlaegt die Laengenpruefung der
+        // Library an und der Nutzer bekommt eine Fehlermeldung, statt dass
+        // seine Daten still abgeschnitten werden.
+        if (original.length <= maxLen && converted.length > maxLen) {
+            converted = SEPA.toSepaText(original, maxLen);
+        }
+
+        if (original && converted !== original) {
+            sepaTextChanges.push({ from: original, to: converted });
+        }
+        return converted;
     }
 
     /**
