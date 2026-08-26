@@ -166,6 +166,18 @@ Nicht umgewandelt werden IBAN, BIC, Glaeubiger-ID und Datumsfelder: die sind
 bereits auf A-Z/0-9 beschraenkt und wuerden durch eine Umwandlung nur riskieren,
 ihre Pruefziffer zu verlieren.
 
+### Lastschrift-Arten (LclInstrm/Cd)
+- **CORE** -- Basisverfahren fuer alle Kunden (Privat + Firma), Vorlaufzeit
+  1 Bankarbeitstag. Vorauswahl.
+- **B2B** -- Firmenlastschrift, keine Rueckgabe moeglich, setzt ein B2B-Mandat voraus.
+
+**COR1** (die fruehere "Eil-Lastschrift" mit D-1) wurde am 21.11.2016
+abgeschafft: seither gilt die verkuerzte Vorlaufzeit fuer CORE, und CORE hat die
+Funktion uebernommen. Die Schemata der Kreditwirtschaft kennen den Code nicht
+mehr und lehnen ab mit `Element 'Cd': [facet 'enumeration'] The value 'COR1' is
+not an element of the set`. Der Code wurde aus der Auswahl entfernt; gespeicherte
+Konfigurationen mit COR1 werden beim Laden auf CORE gehoben.
+
 ### Formatabhaengige Schema-Unterschiede
 Die pain-Formate ab `.08` setzen auf den ISO-20022-Basistypen von 2019 auf und
 unterscheiden sich in zwei Elementen von `.02`/`.03`:
@@ -204,7 +216,7 @@ npm test
 |---|---|
 | Lastschrift x Formate | Alle pain.008-Formate mit verschiedenen Optionen |
 | Ueberweisung x Formate | Alle pain.001-Formate mit verschiedenen Optionen |
-| Sequenztyp x Instrumentierung | 4x3 Matrix (FRST/RCUR/OOFF/FNAL x CORE/COR1/B2B) |
+| Sequenztyp x Lastschrift-Art | Matrix (FRST/RCUR/OOFF/FNAL x CORE/B2B) |
 | IBAN-Validierung | Gueltige + ungueltige IBANs |
 | Glaeubiger-ID-Validierung | Gueltige + ungueltige IDs |
 | Fehlerfaelle & Grenzwerte | Betraege, BIC, Mandate, Zeichenlaengen |
@@ -217,6 +229,8 @@ npm test
 | BIC vs. BICFI | Formatabhaengiger Elementname |
 | ReqdExctnDt-Struktur | ISODate vs. DateAndDateTime2Choice |
 | SEPA-Zeichensatz | Umwandlung und Wirkung im XML |
+| Lastschrift-Art | CORE/B2B gueltig, COR1 abgelehnt |
+| Konfigurations-Migration | Gespeichertes COR1 wird auf CORE gehoben |
 
 ### Schema-Validierung
 Die Zeichenketten-Pruefungen der uebrigen Suiten reichen nicht aus: drei
@@ -230,6 +244,11 @@ laufen. Aktualisieren:
 ```bash
 node tools/fetch-xsd.mjs
 ```
+
+Die eingecheckten Schemata sind die vom EPC veroeffentlichte **Core**-Variante
+(Typname `..._SDD_Core_C2PSP`). Sie lassen in `LclInstrm/Cd` ausschliesslich
+`CORE` zu; B2B-Lastschriften haben ein eigenes Schema, das die Bezugsquelle
+nicht anbietet, und werden deshalb strukturell statt per XSD geprueft.
 
 `xmllint` ist auf macOS vorinstalliert; unter Debian/Ubuntu liefert es
 `apt-get install libxml2-utils`. Fehlt es, wird die Suite sichtbar uebersprungen

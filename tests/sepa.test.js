@@ -51,7 +51,9 @@ const TEST_DATA = {
 
 // Sequence types and local instrumentations to iterate over
 const SEQUENCE_TYPES        = ['FRST', 'RCUR', 'OOFF', 'FNAL'];
-const LOCAL_INSTRUMENTATIONS = ['CORE', 'COR1', 'B2B'];
+// COR1 ("Eil-Lastschrift") fehlt hier bewusst: zum 21.11.2016 abgeschafft,
+// CORE hat die verkuerzte Vorlaufzeit uebernommen. Siehe Suite "Lastschrift-Art".
+const LOCAL_INSTRUMENTATIONS = ['CORE', 'B2B'];
 
 // All supported pain formats grouped by type
 const DD_FORMATS  = ['pain.008.001.02', 'pain.008.001.08'];
@@ -1706,6 +1708,13 @@ const XSD_FORMATS = [
   'pain.008.001.08',
 ];
 
+// Lastschrift-Arten, die gegen die eingecheckten XSDs NICHT validiert werden
+// koennen: das sind die vom EPC veroeffentlichten Core-Schemata (Typname
+// ..._SDD_Core_C2PSP), die in LclInstrm/Cd ausschliesslich CORE zulassen. B2B
+// hat ein eigenes Schema, das die Bezugsquelle nicht anbietet – es wird in der
+// Suite "Lastschrift-Art" strukturell geprueft.
+const XSD_UNSUPPORTED_INSTRUMENTS = ['B2B'];
+
 const xsdTmpDir = mkdtempSync(path.join(os.tmpdir(), 'sepa-xsd-'));
 let xsdFileCounter = 0;
 
@@ -1776,6 +1785,24 @@ describe('Schema-Validierung (XSD)', { skip: SKIP_XSD }, () => {
         : excelToXML(TEMPLATE_ROWS_CT, 'transfer', fmt);
       assertSchemaValid(xml, fmt);
     });
+
+    if (isDD) {
+      // Deckt die Luecke, durch die COR1 unbemerkt blieb: die
+      // Sequenztyp-x-Instrumentierung-Matrix prueft nur, ob die Erzeugung
+      // durchlaeuft, nicht ob das Ergebnis schema-konform ist.
+      //
+      // Bewusst ueber LOCAL_INSTRUMENTATIONS statt ueber eine feste Liste:
+      // wird der Auswahl je ein neuer Code hinzugefuegt, wird er hier
+      // automatisch gegen das Schema geprueft.
+      for (const instr of LOCAL_INSTRUMENTATIONS.filter(i => !XSD_UNSUPPORTED_INSTRUMENTS.includes(i))) {
+        it(`${fmt}: ${instr} validiert in allen Sequenztypen`, () => {
+          for (const seq of SEQUENCE_TYPES) {
+            const doc = createDirectDebitDoc(fmt, { sequenceType: seq, localInstrumentation: instr });
+            assertSchemaValid(doc.toString(), fmt);
+          }
+        });
+      }
+    }
 
     it(`${fmt}: Excel-Pipeline mit Umlauten validiert`, () => {
       const rows = isDD
@@ -1998,5 +2025,102 @@ describe('InstrId und CreDtTm', () => {
     const xml = createTransferDoc('pain.001.001.09').toString();
     assert.ok(xml.includes('<CreDtTm>2026-01-15T10:00:00Z</CreDtTm>'),
       'Erwartet YYYY-MM-DDThh:mm:ssZ ohne Sekundenbruchteile');
+  });
+});
+
+// -------------------------------------------------------------------------
+// 19. Lastschrift-Art: CORE und B2B, kein COR1
+// -------------------------------------------------------------------------
+//
+// Gemeldet von einem Nutzer: pain.008.001.08 wurde abgelehnt mit
+// "Element 'Cd': [facet 'enumeration'] The value 'COR1' is not an element of
+// the set". COR1 ("Eil-Lastschrift", D-1) wurde zum 21.11.2016 abgeschafft –
+// seither gilt die verkuerzte Vorlaufzeit fuer CORE, und CORE hat die Funktion
+// uebernommen. Die Schemata der Kreditwirtschaft kennen den Code nicht mehr.
+//
+// Warum das durchrutschte: Die Matrix-Suite oben erzeugt zwar COR1-Dokumente,
+// prueft aber nur, ob die XML-Erzeugung fehlerfrei durchlaeuft – nicht, ob das
+// Ergebnis schema-konform ist. Die XSD-Suite deckte wiederum nur den Standard-
+// fall CORE ab. Beide Luecken sind jetzt geschlossen.
+
+describe('Lastschrift-Art (LclInstrm)', () => {
+
+  it('COR1 wird abgelehnt', () => {
+    assert.throws(
+      () => createDirectDebitDoc('pain.008.001.08', { localInstrumentation: 'COR1' }).toString(),
+      /localInstrumentation/,
+      'COR1 ist seit dem 21.11.2016 kein gueltiger Code mehr'
+    );
+  });
+
+  it('COR1 wird auch im alten Format abgelehnt', () => {
+    // Der Fehler betraf nicht nur .08: auch pain.008.001.02 kennt COR1 nicht
+    // mehr, und dieses Format ist im Tool vorausgewaehlt.
+    assert.throws(
+      () => createDirectDebitDoc('pain.008.001.02', { localInstrumentation: 'COR1' }).toString(),
+      /localInstrumentation/
+    );
+  });
+
+  it('ein Fantasie-Code wird ebenfalls abgelehnt', () => {
+    assert.throws(
+      () => createDirectDebitDoc('pain.008.001.08', { localInstrumentation: 'CORE1' }).toString(),
+      /localInstrumentation/
+    );
+  });
+
+  for (const fmt of DD_FORMATS) {
+    it(`${fmt}: CORE landet als <Cd>CORE</Cd> im XML`, () => {
+      const xml = createDirectDebitDoc(fmt, { localInstrumentation: 'CORE' }).toString();
+      assert.ok(xml.includes('<LclInstrm><Cd>CORE</Cd></LclInstrm>'));
+    });
+
+    it(`${fmt}: B2B bleibt verfuegbar`, () => {
+      // B2B ist NICHT abgeschafft – nur COR1. Ein pauschales Aufraeumen der
+      // Auswahlliste wuerde Firmenlastschriften unmoeglich machen.
+      const xml = createDirectDebitDoc(fmt, { localInstrumentation: 'B2B' }).toString();
+      assert.ok(xml.includes('<LclInstrm><Cd>B2B</Cd></LclInstrm>'));
+    });
+  }
+
+  // Hinweis zur Schema-Pruefung von B2B:
+  // Die XSDs in tests/xsd/ sind die vom EPC veroeffentlichte Core-Variante
+  // (Typname ..._SDD_Core_C2PSP) und lassen in LclInstrm/Cd ausschliesslich
+  // CORE zu. B2B-Dateien werden gegen das separate B2B-Schema geprueft, das
+  // die Bezugsquelle nicht anbietet. B2B wird deshalb oben strukturell statt
+  // per XSD abgesichert – nicht, weil der Code ungeprueft waere.
+  it('die eingecheckten XSDs sind die Core-Variante (dokumentiert die Luecke oben)', () => {
+    const { readFileSync } = require('node:fs');
+    const xsd = readFileSync(path.join(XSD_DIR, 'pain.008.001.08.xsd'), 'utf8');
+    assert.ok(xsd.includes('_SDD_Core_C2PSP'),
+      'Erwartet die Core-Variante – sonst stimmt der Kommentar zur B2B-Abdeckung nicht mehr');
+  });
+});
+
+// -------------------------------------------------------------------------
+// 20. Migration gespeicherter Konfigurationen
+// -------------------------------------------------------------------------
+
+describe('Konfigurations-Migration', () => {
+
+  // Spiegelt migrateLocalInstrument() aus sepa-generator.js.
+  const migrateLocalInstrument = (value) => (value === 'COR1' ? 'CORE' : value);
+
+  it('gespeichertes COR1 wird auf CORE migriert', () => {
+    // Ohne Migration setzt der Restore das Auswahlfeld auf einen nicht mehr
+    // existierenden Eintrag – der Wert waere leer und die XML enthielte <Cd/>.
+    assert.strictEqual(migrateLocalInstrument('COR1'), 'CORE');
+  });
+
+  it('gueltige Werte bleiben unveraendert', () => {
+    assert.strictEqual(migrateLocalInstrument('CORE'), 'CORE');
+    assert.strictEqual(migrateLocalInstrument('B2B'), 'B2B');
+  });
+
+  it('das migrierte Ergebnis erzeugt schema-valides XML', { skip: SKIP_XSD }, () => {
+    const doc = createDirectDebitDoc('pain.008.001.08', {
+      localInstrumentation: migrateLocalInstrument('COR1'),
+    });
+    assertSchemaValid(doc.toString(), 'pain.008.001.08');
   });
 });

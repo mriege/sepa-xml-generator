@@ -48,7 +48,7 @@
 
     <!-- SEPA-Bibliothek: Erzeugt ISO 20022 XML-Dokumente (pain.001 / pain.008) -->
     <!-- Versionsparameter erzwingt Browser-Reload bei Updates (Cache-Busting). -->
-    <script src="sepa.min.js?v=2026-08-25"></script>
+    <script src="sepa.min.js?v=2026-08-26"></script>
 </head>
 <body>
 
@@ -372,7 +372,7 @@
                                            (FRST=Erstlastschrift, RCUR=Folgelastschrift,
                                             OOFF=Einmalig, FNAL=Letzte)
                          - localInstrumentation → PmtInf/PmtTpInf/LclInstrm/Cd
-                                                  (CORE=Basis, COR1=Schnell, B2B=Firmen)
+                                                  (CORE=Basis, B2B=Firmen)
                     -->
                     <div id="directDebitSettings" class="form-section">
                         <h3>
@@ -448,19 +448,21 @@
                             <!-- Lokale Instrumentierung: Bestimmt Verarbeitungsgeschwindigkeit und Zielgruppe -->
                             <div class="form-group">
                                 <label for="localInstrumentation">
-                                    Lastschrift-Geschwindigkeit
+                                    Lastschrift-Art
                                     <span class="help-text">CORE ist Standard</span>
                                 </label>
                                 <select id="localInstrumentation" class="input-with-icon">
-                                    <option value="CORE" selected>🐢 CORE - Basis (5 Tage Vorlauf) ⭐</option>
-                                    <option value="COR1">🐇 COR1 - Schnell (1 Tag Vorlauf)</option>
+                                    <option value="CORE" selected>👤 CORE - Basis (Privat + Firma) ⭐</option>
                                     <option value="B2B">🏢 B2B - Firmen (nur zwischen Unternehmen)</option>
                                 </select>
                                 <div class="help-bubble">
                                     <strong>Welche wählen?</strong><br>
-                                    • <strong>CORE:</strong> Standard für alle Kunden (Privat + Firma)<br>
-                                    • <strong>COR1:</strong> Wenn es schnell gehen muss<br>
-                                    • <strong>B2B:</strong> Nur zwischen Firmen, keine Rückgabe möglich
+                                    • <strong>CORE:</strong> Standard für alle Kunden (Privat + Firma).
+                                      Vorlaufzeit 1 Bankarbeitstag.<br>
+                                    • <strong>B2B:</strong> Nur zwischen Firmen, keine Rückgabe möglich.
+                                      Setzt ein B2B-Mandat voraus.<br>
+                                    <em>COR1 („Eil-Lastschrift") gibt es seit dem 21.11.2016 nicht mehr –
+                                    die kurze Vorlaufzeit gilt seither für CORE.</em>
                                 </div>
                             </div>
                         </div>
@@ -942,18 +944,18 @@
                         </div>
                     </div>
 
-                    <!-- FAQ 5: Instrumentierungen (CORE/COR1/B2B) -->
+                    <!-- FAQ 5: Instrumentierungen (CORE/B2B) -->
                     <div class="faq-item">
                         <div class="faq-question">
-                            <h4>Was ist der Unterschied zwischen CORE, COR1 und B2B?</h4>
+                            <h4>Was ist der Unterschied zwischen CORE und B2B?</h4>
                             <span class="faq-toggle">+</span>
                         </div>
                         <div class="faq-answer">
                             <div class="faq-answer-content">
                                 <ul>
-                                    <li><strong>CORE</strong> - Basis-Lastschriftverfahren (5 Tage Vorlaufzeit)</li>
-                                    <li><strong>COR1</strong> - Beschleunigte Lastschrift (1 Tag Vorlaufzeit)</li>
+                                    <li><strong>CORE</strong> - Basis-Lastschriftverfahren für alle Kunden (Privat + Firma), Vorlaufzeit 1 Bankarbeitstag</li>
                                     <li><strong>B2B</strong> - Firmen-Lastschrift (nur zwischen Geschäftskunden, keine Rückgabe möglich)</li>
+                                    <li><strong>COR1</strong> - die frühere „Eil-Lastschrift" wurde am 21.11.2016 abgeschafft. Ihre verkürzte Vorlaufzeit gilt seither für CORE, deshalb steht sie nicht mehr zur Auswahl. Dateien mit COR1 werden von Banken abgelehnt.</li>
                                 </ul>
                             </div>
                         </div>
@@ -1046,7 +1048,7 @@
                             <ul>
                                 <li>Unterschiedliche Ausführungsdaten</li>
                                 <li>Verschiedene Sequenztypen (FRST/RCUR/OOFF/FNAL)</li>
-                                <li>Gemischte Lastschrifttypen (CORE/COR1/B2B)</li>
+                                <li>Gemischte Lastschrifttypen (CORE/B2B)</li>
                             </ul>
                             <p>Aktuell unterstützt die App eine XML-Datei pro Durchlauf. Für komplexere Szenarien generieren Sie mehrere Dateien.</p>
                             </div>
@@ -1211,10 +1213,10 @@
 
     <!-- BLZ->BIC Tabelle (Deutsche Bundesbank): leitet fehlende BICs aus der IBAN ab. -->
     <!-- Muss vor sepa-generator.js geladen werden (setzt window.SEPA_BLZ_BIC). -->
-    <script src="blz-bic.js?v=2026-08-25"></script>
+    <script src="blz-bic.js?v=2026-08-26"></script>
 
     <!-- Anwendungslogik: Event-Handling, Validierung, XML-Generierung -->
     <!-- Versionsparameter erzwingt Browser-Reload bei Updates (Cache-Busting). -->
-    <script src="sepa-generator.js?v=2026-08-25"></script>
+    <script src="sepa-generator.js?v=2026-08-26"></script>
 </body>
 </html>

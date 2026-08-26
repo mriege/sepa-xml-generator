@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const creditorIdInput = document.getElementById('creditorId');
     /** Sequenztyp: FRST/RCUR/OOFF/FNAL (nur Lastschrift) */
     const sequenceTypeSelect = document.getElementById('sequenceType');
-    /** Instrumentierung: CORE/COR1/B2B (nur Lastschrift) */
+    /** Instrumentierung: CORE/B2B (nur Lastschrift) */
     const localInstrumentationSelect = document.getElementById('localInstrumentation');
     /** Auftraggeber-Name (nur Ueberweisung) */
     const debtorNameInput = document.getElementById('debtorName');
@@ -307,7 +307,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (config.creditorBIC) creditorBICInput.value = config.creditorBIC;
                     if (config.creditorId) creditorIdInput.value = config.creditorId;
                     if (config.sequenceType) sequenceTypeSelect.value = config.sequenceType;
-                    if (config.localInstrumentation) localInstrumentationSelect.value = config.localInstrumentation;
+                    if (config.localInstrumentation) localInstrumentationSelect.value = migrateLocalInstrument(config.localInstrumentation);
                     if (config.debtorName) debtorNameInput.value = config.debtorName;
                     if (config.debtorIBAN) debtorIBANInput.value = config.debtorIBAN;
                     if (config.debtorBIC) debtorBICInput.value = config.debtorBIC;
@@ -1144,7 +1144,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     : deriveBIC(info.creditorIBAN);
                 info.creditorId = creditorIdInput.value.trim().toUpperCase();
                 info.sequenceType = sequenceTypeSelect.value;             // FRST/RCUR/OOFF/FNAL
-                info.localInstrumentation = localInstrumentationSelect.value;  // CORE/COR1/B2B
+                info.localInstrumentation = localInstrumentationSelect.value;  // CORE oder B2B
 
                 // === Schritt 5a: Lastschrift-Transaktionen hinzufuegen ===
                 currentTransactions.forEach(t => {
@@ -1420,7 +1420,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (config.creditorBIC) creditorBICInput.value = config.creditorBIC;
             if (config.creditorId) creditorIdInput.value = config.creditorId;
             if (config.sequenceType) sequenceTypeSelect.value = config.sequenceType;
-            if (config.localInstrumentation) localInstrumentationSelect.value = config.localInstrumentation;
+            if (config.localInstrumentation) localInstrumentationSelect.value = migrateLocalInstrument(config.localInstrumentation);
             if (config.debtorName) debtorNameInput.value = config.debtorName;
             if (config.debtorIBAN) debtorIBANInput.value = config.debtorIBAN;
             if (config.debtorBIC) debtorBICInput.value = config.debtorBIC;
@@ -1534,6 +1534,23 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!/^DE\d{20}$/.test(clean)) return '';
         const table = (typeof window !== 'undefined' && window.SEPA_BLZ_BIC) || {};
         return table[clean.substr(4, 8)] || '';
+    }
+
+    /**
+     * Migriert gespeicherte Konfigurationen auf gueltige Lastschrift-Arten.
+     *
+     * COR1 ("Eil-Lastschrift") wurde zum 21.11.2016 abgeschafft; CORE hat die
+     * verkuerzte Vorlaufzeit uebernommen. Die Option ist deshalb aus dem
+     * Auswahlfeld entfernt. Ohne diese Migration wuerde ein alter Wert aus dem
+     * localStorage oder einer exportierten Konfigurationsdatei das Auswahlfeld
+     * auf einen nicht existierenden Eintrag setzen – der Wert waere dann leer
+     * und die XML enthielte ein leeres <Cd/>.
+     *
+     * @param {string} value - Gespeicherter Wert
+     * @returns {string} Gueltiger Wert (CORE oder B2B)
+     */
+    function migrateLocalInstrument(value) {
+        return value === 'COR1' ? 'CORE' : value;
     }
 
     /**
